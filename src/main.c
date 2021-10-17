@@ -80,8 +80,20 @@ Vec2* path_getNode(Path *path, int index) {
 }
 
 double findMiterPiece(Vec2 r0, Vec2 r1, unsigned int stroke_width) {
-    float psi = PI_2 - acos(vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1)))/2;
+    float theta = acos(vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1)));
+    //float thetac = asin(vec2_cross(r0, r1) / (vec2_len(r0)*vec2_len(r1)));
+
+    // TODO: This is a bit of a hack. I could not get a cross product working to
+    // get accurate angle data, so I am now using a reversed dot product for the
+    // angle and a '2d cross product' for the sign data.
+    // Might have to look into this again when I am fresh...
+    theta = copysign(theta, vec2_cross(r0, r1));
+
+    float psi = PI_2 - theta/2;
     float a = stroke_width/2 / tan(psi);
+
+    //printf("dot: %f, cross; %f\n", theta, thetac);
+    //printf("%f\n", copysign(theta, vec2_cross(r0, r1)));
 
     return a;
 }

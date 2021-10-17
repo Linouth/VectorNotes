@@ -38,6 +38,10 @@ double vec2_dot(Vec2 v1, Vec2 v2) {
     return v1.x * v2.x + v1.y * v2.y;
 }
 
+double vec2_cross(Vec2 v1, Vec2 v2) {
+    return v1.x*v2.y - v1.y*v2.x;
+}
+
 double vec2_distSqr(Vec2 v1, Vec2 v2) {
     double x = v1.x - v2.x;
     double y = v1.y - v2.y;
