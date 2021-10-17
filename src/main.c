@@ -27,34 +27,29 @@
 #include <assert.h>
 #include <math.h>
 
+#include "vec.h"
 #include "gl.h"
+
+const double PI = 3.1415926535897932384626433832795;
+const double PI_2 = 1.57079632679489661923;
 
 #define WIDTH 800
 #define HEIGHT 600
 
-typedef struct vec2 {
-    double x;
-    double y;
-} Vec2;
-
-double vec2_dot(Vec2 *v1, Vec2 *v2) {
-    return v1->x * v2->x + v1->y * v2->y;
-}
-
-double vec2_distSqr(Vec2 *v1, Vec2 *v2) {
-    double x = v1->x - v2->x;
-    double y = v1->y - v2->y;
-    return x*x + y*y;
-}
-
-double vec2_dist(Vec2 *v1, Vec2 *v2) {
-    return sqrt(vec2_distSqr(v1, v2));
-}
+typedef enum path_cmd {
+    PATHCMD_line_to,
+    PATHCMD_count,
+} PathCmd;
 
 #define PATH_MAX_NODES 128 * 4
 typedef struct path {
     Vec2    nodes[PATH_MAX_NODES];
     size_t  node_cnt;
+
+    Vec2    vertices[PATH_MAX_NODES*2];
+    size_t  vertex_cnt;
+
+    PathCmd commands[PATH_MAX_NODES];
 } Path;
 
 Path path_init() {
@@ -69,10 +64,11 @@ unsigned int shader_program;
 void path_addNode(Path *path, Vec2 node) {
     assert(path->node_cnt < PATH_MAX_NODES);
     path->nodes[path->node_cnt++] = node;
+}
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    g_path.nodes[g_path.node_cnt] = g_path.nodes[g_path.node_cnt-1];
-    glBufferData(GL_ARRAY_BUFFER, (g_path.node_cnt+1) * sizeof(Vec2), g_path.nodes, GL_DYNAMIC_DRAW);
+void path_addVertex(Path *path, Vec2 vertex) {
+    assert(path->vertex_cnt < PATH_MAX_NODES*2);
+    path->vertices[path->vertex_cnt++] = vertex;
 }
 
 Vec2* path_getNode(Path *path, int index) {
@@ -81,6 +77,97 @@ Vec2* path_getNode(Path *path, int index) {
         return &path->nodes[pos];
     }
     return NULL;
+}
+
+double findMiterPiece(Vec2 r0, Vec2 r1, unsigned int stroke_width) {
+    float psi = PI_2 - acos(vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1)))/2;
+    float a = stroke_width/2 / tan(psi);
+
+    return a;
+}
+
+void handleStroke(Path *path, Vec2 p0, Vec2 p1, Vec2 r, double b, unsigned int stroke_width) {
+    Vec2 n = {
+        .x = -r.y,
+        .y = r.x,
+    };
+    Vec2 n_scaled = vec2_scalarMult(vec2_norm(n), stroke_width/2);
+
+    Vec2 rn = vec2_norm(r);
+
+    Vec2 v;
+    // Not needed, since we are using triangle_strip. The first two vertices for
+    // this stroke section are already placed.
+    //{
+    //    Vec2 rna = vec2_scalarMult(rn, a);
+
+    //    v = vec2_add(p0, n_scaled);
+    //    v = vec2_add(v, rna);
+    //    path_addVertex(path, v);
+
+    //    v = vec2_sub(p0, n_scaled);
+    //    v = vec2_sub(v, rna);
+    //    path_addVertex(path, v);
+    //}
+    {
+        Vec2 rnb = vec2_scalarMult(rn, b);
+
+        v = vec2_add(p1, n_scaled);
+        v = vec2_sub(v, rnb);
+        path_addVertex(path, v);
+
+        v = vec2_sub(p1, n_scaled);
+        v = vec2_add(v, rnb);
+        path_addVertex(path, v);
+    }
+}
+
+void path_stroke(Path *path, unsigned int stroke_width) {
+    assert(path->node_cnt >= 3);
+
+    // Draw the first stroke
+    {
+        Vec2 p0 = path->nodes[0];
+        Vec2 p1 = path->nodes[1];
+        Vec2 p2 = path->nodes[2];
+
+        Vec2 r0 = vec2_sub(p1, p0);
+        Vec2 r1 = vec2_sub(p2, p1);
+
+        double b = findMiterPiece(r0, r1, stroke_width);
+
+        // Place the first two vertices manually
+        Vec2 n = {
+            .x = -r0.y,
+            .y = r0.x,
+        };
+        Vec2 n_scaled = vec2_scalarMult(vec2_norm(n), stroke_width/2);
+        path_addVertex(path, vec2_add(p0, n_scaled));
+        path_addVertex(path, vec2_sub(p0, n_scaled));
+
+        handleStroke(path, p0, p1, r0, b, stroke_width);
+    }
+
+    for (size_t i = 1; i < path->node_cnt-2; i++) {
+        Vec2 p0 = path->nodes[i];
+        Vec2 p1 = path->nodes[i+1];
+        Vec2 p2 = path->nodes[i+2];
+
+        Vec2 r0 = vec2_sub(p1, p0);
+        Vec2 r1 = vec2_sub(p2, p1);
+
+        double b = findMiterPiece(r0, r1, stroke_width);
+        handleStroke(path, p0, p1, r0, b, stroke_width);
+    }
+
+    // Draw the last stroke
+    {
+        Vec2 p0 = path->nodes[path->node_cnt-2];
+        Vec2 p1 = path->nodes[path->node_cnt-1];
+
+        Vec2 r0 = vec2_sub(p1, p0);
+        handleStroke(path, p0, p1, r0, 0, stroke_width);
+    }
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -122,12 +209,17 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
             .y = ypos,
         };
 
-        if (vec2_distSqr(prev_node, &curr) > 100) {
+        if (vec2_distSqr(*prev_node, curr) > 100) {
             printf("Placing new node! %f %f\n", xpos, ypos);
 
             path_addNode(&g_path, curr);
 
             prev_node = path_getNode(&g_path, -1);
+
+            g_path.vertex_cnt = 0; // Hack.
+            path_stroke(&g_path, 10.0);
+            glBindBuffer(GL_ARRAY_BUFFER, VBO);
+            glBufferData(GL_ARRAY_BUFFER, (g_path.vertex_cnt) * sizeof(Vec2), g_path.vertices, GL_DYNAMIC_DRAW);
         }
     } else {
         // Mouse not held
@@ -205,15 +297,28 @@ int main(void) {
     glGenBuffers(1, &VBO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
 
-    double test[] = {
-        200.0, 300.0,
-        400.0, 200.0,
-        600.0, 300.0,
-        450.0, 500.0,
+    Vec2 test[] = {
+        {200.0, 300.0},
+        {400.0, 200.0},
+        {600.0, 300.0},
+        {450.0, 500.0},
     };
 
+    path_addNode(&g_path, test[0]);
+    path_addNode(&g_path, test[1]);
+    path_addNode(&g_path, test[2]);
+    path_addNode(&g_path, test[3]);
+
+    path_stroke(&g_path, 20.0);
+
+    printf("path vetices: %ld\n", g_path.vertex_cnt);
+    for (size_t i = 0; i < g_path.vertex_cnt; i++) {
+        Vec2 v = g_path.vertices[i];
+        printf("(%f, %f)\n", v.x, v.y);
+    }
+
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(test), test, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(g_path.vertices), g_path.vertices, GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(0);
@@ -222,11 +327,10 @@ int main(void) {
         { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
         //{ GL_TESS_CONTROL_SHADER, true, "glsl/bezier.tcs" },
         //{ GL_TESS_EVALUATION_SHADER, true, "glsl/bezier.tes" },
-        { GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
+        //{ GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
         { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
         { GL_NONE },
     };
-
 
     shader_program = gl_createProgram(shaders);
     if (!shader_program) {
@@ -248,10 +352,13 @@ int main(void) {
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
         // equal to the last. This will buffer overflow.
-        glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, 4);
-        glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, g_path.node_cnt+1);
+        //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, 4);
+        //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, g_path.node_cnt+1);
 
-        //glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glPointSize(3.0f);
+        glDrawArrays(GL_POINTS, 0, g_path.vertex_cnt);
+        glLineWidth(1.0f);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, g_path.vertex_cnt);
         //glDrawArrays(GL_TRIANGLES, 0, g_path.node_cnt);
 
         //glEnable(GL_LINE_SMOOTH);
