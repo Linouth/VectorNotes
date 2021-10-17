@@ -80,7 +80,11 @@ Vec2* path_getNode(Path *path, int index) {
 }
 
 double findMiterPiece(Vec2 r0, Vec2 r1, unsigned int stroke_width) {
-    float theta = acos(vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1)));
+    // NOTE: The argument for acos HAS to be cast into a float, otherwise the
+    // double representation of arg is somehow slightly highter than 1 which
+    // results in 'nan' from 'acos'...
+    float arg = vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1));
+    float theta = acos(arg);
     //float thetac = asin(vec2_cross(r0, r1) / (vec2_len(r0)*vec2_len(r1)));
 
     // TODO: This is a bit of a hack. I could not get a cross product working to
@@ -91,9 +95,6 @@ double findMiterPiece(Vec2 r0, Vec2 r1, unsigned int stroke_width) {
 
     float psi = PI_2 - theta/2;
     float a = stroke_width/2 / tan(psi);
-
-    //printf("dot: %f, cross; %f\n", theta, thetac);
-    //printf("%f\n", copysign(theta, vec2_cross(r0, r1)));
 
     return a;
 }
@@ -108,19 +109,8 @@ void handleStroke(Path *path, Vec2 p0, Vec2 p1, Vec2 r, double b, unsigned int s
     Vec2 rn = vec2_norm(r);
 
     Vec2 v;
-    // Not needed, since we are using triangle_strip. The first two vertices for
-    // this stroke section are already placed.
-    //{
-    //    Vec2 rna = vec2_scalarMult(rn, a);
-
-    //    v = vec2_add(p0, n_scaled);
-    //    v = vec2_add(v, rna);
-    //    path_addVertex(path, v);
-
-    //    v = vec2_sub(p0, n_scaled);
-    //    v = vec2_sub(v, rna);
-    //    path_addVertex(path, v);
-    //}
+    // We are using TRIANGLE_STRIP. The first two vertices for this section are
+    // already placed by the previous handle call.
     {
         Vec2 rnb = vec2_scalarMult(rn, b);
 
@@ -367,8 +357,8 @@ int main(void) {
         //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, 4);
         //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, g_path.node_cnt+1);
 
-        glPointSize(3.0f);
-        glDrawArrays(GL_POINTS, 0, g_path.vertex_cnt);
+        //glPointSize(3.0f);
+        //glDrawArrays(GL_POINTS, 0, g_path.vertex_cnt);
         glLineWidth(1.0f);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, g_path.vertex_cnt);
         //glDrawArrays(GL_TRIANGLES, 0, g_path.node_cnt);
