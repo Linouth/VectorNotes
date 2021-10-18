@@ -37,6 +37,7 @@ const double PI_2 = 1.57079632679489661923;
 #define HEIGHT 600
 
 typedef enum path_cmd {
+    PATHCMD_end,
     PATHCMD_line_to,
     PATHCMD_count,
 } PathCmd;
@@ -79,10 +80,23 @@ Vec2* path_getNode(Path *path, int index) {
     return NULL;
 }
 
+/**
+ * Finds the delta shift needed at the vertices for a perfect miter join.
+ *
+ * It finds the length of = in the graphic below.
+ * -----=/|
+ *      / |
+ *     /  |
+ * ---/=  |
+ *    |   |
+ *
+ * r0 is the current linepiece vector. r1 is the next linepiece vector.
+ */
 double findMiterPiece(Vec2 r0, Vec2 r1, unsigned int stroke_width) {
     // NOTE: The argument for acos HAS to be cast into a float, otherwise the
     // double representation of arg is somehow slightly highter than 1 which
-    // results in 'nan' from 'acos'...
+    // results in 'nan' from 'acos'... (Floating point inaccuracies, yay.)
+    // Might be better to actually clip it.
     float arg = vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1));
     float theta = acos(arg);
     //float thetac = asin(vec2_cross(r0, r1) / (vec2_len(r0)*vec2_len(r1)));
@@ -169,6 +183,26 @@ void path_stroke(Path *path, unsigned int stroke_width) {
 
         Vec2 r0 = vec2_sub(p1, p0);
         handleStroke(path, p0, p1, r0, 0, stroke_width);
+    }
+}
+
+void tesselate_bezier(Path *path, Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, unsigned int level) {
+    double t = 0;
+    while (t < 0.99999999) {
+        t += 1.0 / (level+1);
+        printf("%f\n", t);
+
+        double B0 = (1-t)*(1-t)*(1-t);
+        double B1 = 3*(1-t)*(1-t)*t;
+        double B2 = 3*(1-t)*t*t;
+        double B3 = t*t*t;
+
+        Vec2 p = {
+            .x = B0*p0.x + B1*p1.x + B2*p2.x + B3*p3.x,
+            .y = B0*p0.y + B1*p1.y + B2*p2.y + B3*p3.y,
+        };
+
+        path_addNode(path, p);
     }
 }
 
@@ -300,24 +334,29 @@ int main(void) {
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
 
     Vec2 test[] = {
-        {200.0, 300.0},
         {400.0, 200.0},
-        {600.0, 300.0},
-        {450.0, 500.0},
+        {200.0, 250.0},
+        {220.0, 400.0},
+        {400.0, 350.0},
     };
 
     path_addNode(&g_path, test[0]);
-    path_addNode(&g_path, test[1]);
-    path_addNode(&g_path, test[2]);
-    path_addNode(&g_path, test[3]);
+    //path_addNode(&g_path, test[1]);
+    //path_addNode(&g_path, test[2]);
+    //path_addNode(&g_path, test[3]);
+
+    tesselate_bezier(&g_path, test[0], test[1], test[2], test[3], 32);
+
+    //Vec2 tmp = {100.0, 600.0};
+    //path_addNode(&g_path, tmp);
 
     path_stroke(&g_path, 20.0);
 
-    printf("path vetices: %ld\n", g_path.vertex_cnt);
-    for (size_t i = 0; i < g_path.vertex_cnt; i++) {
-        Vec2 v = g_path.vertices[i];
-        printf("(%f, %f)\n", v.x, v.y);
-    }
+    //printf("path vetices: %ld\n", g_path.vertex_cnt);
+    //for (size_t i = 0; i < g_path.vertex_cnt; i++) {
+    //    Vec2 v = g_path.vertices[i];
+    //    printf("(%f, %f)\n", v.x, v.y);
+    //}
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_path.vertices), g_path.vertices, GL_STATIC_DRAW);
