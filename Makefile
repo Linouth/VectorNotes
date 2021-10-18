@@ -4,9 +4,9 @@ CC = zig cc
 BIN = vectornotes
 BUILD_DIR = build
 SRC_DIR = src
-INC_DIR = inc
+INC_DIR = inc src
 
-INC_DIRS = $(shell find $(INC_DIR) -type d)
+INC_DIRS = $(shell find $(INC_DIR) -type d -not -path '*/\.*')
 INC_FLAGS = $(addprefix -I,$(INC_DIRS))
 
 SRC = $(shell find $(SRC_DIR) -name '*.c' -not -path '*/\.*')
