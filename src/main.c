@@ -1,28 +1,15 @@
-// https://stackoverflow.com/questions/68134348/draw-anti-aliased-thick-tessellated-curves
-// Good: https://jcgt.org/published/0002/02/08/paper.pdf
-//
-// https://github.com/memononen/nanovg
-// https://github.com/tyt2y3/vaserenderer
-//
-// https://computeranimations.wordpress.com/2015/03/16/rasterization-of-parametric-curves-using-tessellation-shaders-in-glsl/
-// https://github.com/fcaruso/GLSLParametricCurve
-//
-// Geometry shaders for drawing strokes: https://gfx.cs.princeton.edu/pubs/Cole_2010_TFM/cole_tfm_preprint.pdf
-//     - https://www.youtube.com/watch?v=RP1MVD4hAJM
-//     - Apparently geometry shaders are slow(?). Tesselation shaders are
-//     quicker.
-//
-// https://mattdesl.svbtle.com/drawing-lines-is-hard
-//
-// Generally people incrementally add data to VBO with glBufferSubData for
-// something like this.
+// Next up: Determine rate at which the direction is changing. Calc the current
+// tangent vector and project the new r vector on it. Use that projection as
+// some tolerance / weight for how frequent points should be placed. (e.g. If
+// projection is 100%, only place every x pixels. If projection is only 60% or
+// so, place very frequently as we are probably going around a curve right now)
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include "nanovg.h"
+#include "nanovg/nanovg.h"
 #define NANOVG_GL3_IMPLEMENTATION
-#include "nanovg_gl.h"
+#include "nanovg/nanovg_gl.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -40,6 +27,22 @@ const double PI_2 = 1.57079632679489661923;
 #define WIDTH 800
 #define HEIGHT 600
 
+enum vbo_type {
+    VBO_spline,
+    VBO_count,
+};
+
+enum vao_type {
+    VAO_spline,
+    VAO_count,
+};
+
+enum shader_type {
+    SHADER_spline,
+    SHADER_debug,
+    SHADER_count,
+};
+
 typedef enum path_cmd {
     PATHCMD_end,
     PATHCMD_line_to,
@@ -51,29 +54,19 @@ typedef struct path {
     Vec2    nodes[PATH_MAX_NODES];
     size_t  node_cnt;
 
-    Vec2    vertices[PATH_MAX_NODES*2];
-    size_t  vertex_cnt;
-
     PathCmd commands[PATH_MAX_NODES];
 } Path;
+
+Path g_path;
 
 Path path_init() {
     Path path = { 0 };
     return path;
 }
 
-Path g_path;
-unsigned int VBO;
-unsigned int shader_program;
-
 void path_addNode(Path *path, Vec2 node) {
     assert(path->node_cnt < PATH_MAX_NODES);
     path->nodes[path->node_cnt++] = node;
-}
-
-void path_addVertex(Path *path, Vec2 vertex) {
-    assert(path->vertex_cnt < PATH_MAX_NODES*2);
-    path->vertices[path->vertex_cnt++] = vertex;
 }
 
 Vec2* path_getNode(Path *path, int index) {
@@ -84,130 +77,75 @@ Vec2* path_getNode(Path *path, int index) {
     return NULL;
 }
 
-/**
- * Finds the delta shift needed at the vertices for a perfect miter join.
- *
- * It finds the length of = in the graphic below.
- * -----=/|
- *      / |
- *     /  |
- * ---/=  |
- *    |   |
- *
- * r0 is the current linepiece vector. r1 is the next linepiece vector.
- */
-double findMiterPiece(Vec2 r0, Vec2 r1, unsigned int stroke_width) {
-    // NOTE: The argument for acos HAS to be cast into a float, otherwise the
-    // double representation of arg is somehow slightly highter than 1 which
-    // results in 'nan' from 'acos'... (Floating point inaccuracies, yay.)
-    // Might be better to actually clip it.
-    float arg = vec2_dot(r0, r1) / (vec2_len(r0) * vec2_len(r1));
-    float theta = acos(arg);
-    //float thetac = asin(vec2_cross(r0, r1) / (vec2_len(r0)*vec2_len(r1)));
+typedef struct ui {
+    GLuint vbo[VBO_count];
+    GLuint vao[VAO_count];
+    GLuint shader[SHADER_count];
 
-    // TODO: This is a bit of a hack. I could not get a cross product working to
-    // get accurate angle data, so I am now using a reversed dot product for the
-    // angle and a '2d cross product' for the sign data.
-    // Might have to look into this again when I am fresh...
-    theta = copysign(theta, vec2_cross(r0, r1));
+    Vec2 mouse_pos;
+    int mouse_button, mouse_action;
 
-    float psi = PI_2 - theta/2;
-    float a = stroke_width/2 / tan(psi);
+    unsigned int width, height;
+} UI;
 
-    return a;
-}
+UI ui;
 
-void handleStroke(Path *path, Vec2 p0, Vec2 p1, Vec2 r, double b, unsigned int stroke_width) {
-    Vec2 n = {
-        .x = -r.y,
-        .y = r.x,
-    };
-    Vec2 n_scaled = vec2_scalarMult(vec2_norm(n), stroke_width/2);
+UI ui_init() {
+    UI ui = { 0 };
 
-    Vec2 rn = vec2_norm(r);
+    glGenVertexArrays(VAO_count, ui.vao);
+    glGenBuffers(VBO_count, ui.vbo);
+    for (int i = 0; i < VAO_count; i++) {
+        assert(i < VBO_count);
+        glBindVertexArray(ui.vao[i]);
+        glBindBuffer(GL_ARRAY_BUFFER, ui.vbo[i]);
 
-    Vec2 v;
-    // We are using TRIANGLE_STRIP. The first two vertices for this section are
-    // already placed by the previous handle call.
+        switch (i) {
+        case VAO_spline:
+            glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
+            glEnableVertexAttribArray(0);
+            break;
+
+        default: break;
+        }
+    }
+    glBindVertexArray(0);
+
+    // TODO: Check if createProgram was successful. Also, this could be done
+    // programmatically
     {
-        Vec2 rnb = vec2_scalarMult(rn, b);
-
-        v = vec2_add(p1, n_scaled);
-        v = vec2_sub(v, rnb);
-        path_addVertex(path, v);
-
-        v = vec2_sub(p1, n_scaled);
-        v = vec2_add(v, rnb);
-        path_addVertex(path, v);
-    }
-}
-
-void path_stroke(Path *path, unsigned int stroke_width) {
-    assert(path->node_cnt >= 3);
-
-    // Draw the first stroke
-    {
-        Vec2 p0 = path->nodes[0];
-        Vec2 p1 = path->nodes[1];
-        Vec2 p2 = path->nodes[2];
-
-        Vec2 r0 = vec2_sub(p1, p0);
-        Vec2 r1 = vec2_sub(p2, p1);
-
-        double b = findMiterPiece(r0, r1, stroke_width);
-
-        // Place the first two vertices manually
-        Vec2 n = {
-            .x = -r0.y,
-            .y = r0.x,
-        };
-        Vec2 n_scaled = vec2_scalarMult(vec2_norm(n), stroke_width/2);
-        path_addVertex(path, vec2_add(p0, n_scaled));
-        path_addVertex(path, vec2_sub(p0, n_scaled));
-
-        handleStroke(path, p0, p1, r0, b, stroke_width);
-    }
-
-    for (size_t i = 1; i < path->node_cnt-2; i++) {
-        Vec2 p0 = path->nodes[i];
-        Vec2 p1 = path->nodes[i+1];
-        Vec2 p2 = path->nodes[i+2];
-
-        Vec2 r0 = vec2_sub(p1, p0);
-        Vec2 r1 = vec2_sub(p2, p1);
-
-        double b = findMiterPiece(r0, r1, stroke_width);
-        handleStroke(path, p0, p1, r0, b, stroke_width);
-    }
-
-    // Draw the last stroke
-    {
-        Vec2 p0 = path->nodes[path->node_cnt-2];
-        Vec2 p1 = path->nodes[path->node_cnt-1];
-
-        Vec2 r0 = vec2_sub(p1, p0);
-        handleStroke(path, p0, p1, r0, 0, stroke_width);
-    }
-}
-
-void tesselate_bezier(Path *path, Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, unsigned int level) {
-    double t = 0;
-    while (t < 0.99999999) {
-        t += 1.0 / (level+1);
-        printf("%f\n", t);
-
-        double B0 = (1-t)*(1-t)*(1-t);
-        double B1 = 3*(1-t)*(1-t)*t;
-        double B2 = 3*(1-t)*t*t;
-        double B3 = t*t*t;
-
-        Vec2 p = {
-            .x = B0*p0.x + B1*p1.x + B2*p2.x + B3*p3.x,
-            .y = B0*p0.y + B1*p1.y + B2*p2.y + B3*p3.y,
+        Shader shaders[] = { // SHADER_spline
+            { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
+            //{ GL_TESS_CONTROL_SHADER, true, "glsl/bezier.tcs" },
+            //{ GL_TESS_EVALUATION_SHADER, true, "glsl/bezier.tes" },
+            //{ GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
+            { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
+            { GL_NONE },
         };
 
-        path_addNode(path, p);
+        ui.shader[SHADER_spline] = gl_createProgram(shaders);
     }
+    {
+        Shader shaders[] = { // SHADER_debug
+            { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
+            //{ GL_TESS_CONTROL_SHADER, true, "glsl/bezier.tcs" },
+            //{ GL_TESS_EVALUATION_SHADER, true, "glsl/bezier.tes" },
+            //{ GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
+            { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
+            { GL_NONE },
+        };
+        ui.shader[SHADER_debug] = gl_createProgram(shaders);
+    }
+
+    return ui;
+}
+
+void ui_drawSpline(UI *ui, Path *path) {
+    glUseProgram(ui->shader[SHADER_spline]);
+    glBindVertexArray(ui->vao[VAO_spline]);
+
+    glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_spline]);
+    glBufferData(GL_ARRAY_BUFFER, path->node_cnt*sizeof(Vec2), path->nodes, GL_DYNAMIC_DRAW);
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -250,16 +188,12 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
         };
 
         if (vec2_distSqr(*prev_node, curr) > 100) {
-            printf("Placing new node! %f %f\n", xpos, ypos);
+            //printf("Placing new node! %f %f\n", xpos, ypos);
+            printf("{%f, %f}\n", xpos, ypos);
 
             path_addNode(&g_path, curr);
 
             prev_node = path_getNode(&g_path, -1);
-
-            g_path.vertex_cnt = 0; // Hack.
-            path_stroke(&g_path, 10.0);
-            glBindBuffer(GL_ARRAY_BUFFER, VBO);
-            glBufferData(GL_ARRAY_BUFFER, (g_path.vertex_cnt) * sizeof(Vec2), g_path.vertices, GL_DYNAMIC_DRAW);
         }
     } else {
         // Mouse not held
@@ -284,7 +218,9 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 static void set_viewport(int width, int height) {
     glViewport(0, 0, width, height);
 
-    glUniform2f(glGetUniformLocation(shader_program, "view_size"), width, height);
+    // TODO: Get rid of ui in global, and find a clean way to pass the view size
+    // to the shader programs
+    glUniform2f(glGetUniformLocation(ui.shader[SHADER_spline], "view_size"), width, height);
 }
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
@@ -294,79 +230,6 @@ static void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 static void glfwError(int id, const char* desc) {
     printf("Error(GLFW): %s\n", desc);
 }
-
-
-void drawGraph(NVGcontext* vg, float x, float y, float w, float h, float t)
-{
-	NVGpaint bg;
-	float samples[6];
-	float sx[6], sy[6];
-	float dx = w/5.0f;
-	int i;
-
-	samples[0] = (1+sinf(t*1.2345f+cosf(t*0.33457f)*0.44f))*0.5f;
-	samples[1] = (1+sinf(t*0.68363f+cosf(t*1.3f)*1.55f))*0.5f;
-	samples[2] = (1+sinf(t*1.1642f+cosf(t*0.33457)*1.24f))*0.5f;
-	samples[3] = (1+sinf(t*0.56345f+cosf(t*1.63f)*0.14f))*0.5f;
-	samples[4] = (1+sinf(t*1.6245f+cosf(t*0.254f)*0.3f))*0.5f;
-	samples[5] = (1+sinf(t*0.345f+cosf(t*0.03f)*0.6f))*0.5f;
-
-	for (i = 0; i < 6; i++) {
-		sx[i] = x+i*dx;
-		sy[i] = y+h*samples[i]*0.8f;
-	}
-
-	// Graph background
-	bg = nvgLinearGradient(vg, x,y,x,y+h, nvgRGBA(0,160,192,0), nvgRGBA(0,160,192,64));
-	nvgBeginPath(vg);
-	nvgMoveTo(vg, sx[0], sy[0]);
-	for (i = 1; i < 6; i++)
-		nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1], sx[i]-dx*0.5f,sy[i], sx[i],sy[i]);
-	nvgLineTo(vg, x+w, y+h);
-	nvgLineTo(vg, x, y+h);
-	nvgFillPaint(vg, bg);
-	nvgFill(vg);
-
-	// Graph line
-	nvgBeginPath(vg);
-	nvgMoveTo(vg, sx[0], sy[0]+2);
-	for (i = 1; i < 6; i++)
-		nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1]+2, sx[i]-dx*0.5f,sy[i]+2, sx[i],sy[i]+2);
-	nvgStrokeColor(vg, nvgRGBA(0,0,0,32));
-	nvgStrokeWidth(vg, 3.0f);
-	nvgStroke(vg);
-
-	nvgBeginPath(vg);
-	nvgMoveTo(vg, sx[0], sy[0]);
-	for (i = 1; i < 6; i++)
-		nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1], sx[i]-dx*0.5f,sy[i], sx[i],sy[i]);
-	nvgStrokeColor(vg, nvgRGBA(0,160,192,255));
-	nvgStrokeWidth(vg, 3.0f);
-	nvgStroke(vg);
-
-	// Graph sample pos
-	for (i = 0; i < 6; i++) {
-		bg = nvgRadialGradient(vg, sx[i],sy[i]+2, 3.0f,8.0f, nvgRGBA(0,0,0,32), nvgRGBA(0,0,0,0));
-		nvgBeginPath(vg);
-		nvgRect(vg, sx[i]-10, sy[i]-10+2, 20,20);
-		nvgFillPaint(vg, bg);
-		nvgFill(vg);
-	}
-
-	nvgBeginPath(vg);
-	for (i = 0; i < 6; i++)
-		nvgCircle(vg, sx[i], sy[i], 4.0f);
-	nvgFillColor(vg, nvgRGBA(0,160,192,255));
-	nvgFill(vg);
-	nvgBeginPath(vg);
-	for (i = 0; i < 6; i++)
-		nvgCircle(vg, sx[i], sy[i], 2.0f);
-	nvgFillColor(vg, nvgRGBA(220,220,220,255));
-	nvgFill(vg);
-
-	nvgStrokeWidth(vg, 1.0f);
-}
-
 
 int main(void) {
     g_path = path_init();
@@ -401,62 +264,61 @@ int main(void) {
     glfwSetKeyCallback(window, key_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
 
-    // Setup vertex array object
-    unsigned int VAO;
-    glGenVertexArrays(1, &VAO);
-    glBindVertexArray(VAO);
-
-    // Setup vertex buffer
-    glGenBuffers(1, &VBO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-
     Vec2 test[] = {
-        {400.0, 200.0},
-        {200.0, 250.0},
-        {220.0, 400.0},
-        {400.0, 350.0},
+        //{400.0, 200.0},
+        //{200.0, 250.0},
+        //{220.0, 400.0},
+        //{400.0, 350.0},
+
+        {465.000000, 323.000000},
+        {463.000000, 313.000000},
+        {461.000000, 303.000000},
+        {459.000000, 293.000000},
+        {457.000000, 283.000000},
+        {457.000000, 272.000000},
+        {457.000000, 260.000000},
+        {457.000000, 249.000000},
+        {458.000000, 239.000000},
+        {460.000000, 229.000000},
+        {463.000000, 219.000000},
+        {467.000000, 209.000000},
+        {472.000000, 199.000000},
+        {479.000000, 191.000000},
+        {487.000000, 183.000000},
+        {496.000000, 177.000000},
+        {507.000000, 173.000000},
+        {517.000000, 171.000000},
+        {529.000000, 171.000000},
+        {539.000000, 172.000000},
+        {549.000000, 175.000000},
+        {559.000000, 179.000000},
+        {570.000000, 183.000000},
+        {580.000000, 188.000000},
+        {591.000000, 194.000000},
+        {600.000000, 199.000000},
+        {609.000000, 205.000000},
+        {618.000000, 211.000000},
+        {626.000000, 218.000000},
+        {634.000000, 226.000000},
+        {641.000000, 234.000000},
+        {647.000000, 243.000000},
+        {652.000000, 252.000000},
+        {657.000000, 262.000000},
+        {661.000000, 273.000000},
+        {663.000000, 283.000000},
+        {665.000000, 293.000000},
+        {666.000000, 303.000000},
+        {667.000000, 313.000000},
+        {667.000000, 324.000000},
+        {667.000000, 335.000000},
+        {665.000000, 345.000000},
     };
 
-    path_addNode(&g_path, test[0]);
-    //path_addNode(&g_path, test[1]);
-    //path_addNode(&g_path, test[2]);
-    //path_addNode(&g_path, test[3]);
-
-    tesselate_bezier(&g_path, test[0], test[1], test[2], test[3], 32);
-
-    //Vec2 tmp = {100.0, 600.0};
-    //path_addNode(&g_path, tmp);
-
-    path_stroke(&g_path, 20.0);
-
-    //printf("path vetices: %ld\n", g_path.vertex_cnt);
-    //for (size_t i = 0; i < g_path.vertex_cnt; i++) {
-    //    Vec2 v = g_path.vertices[i];
-    //    printf("(%f, %f)\n", v.x, v.y);
-    //}
-
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(g_path.vertices), g_path.vertices, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(0);
-
-    Shader shaders[] = {
-        { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
-        //{ GL_TESS_CONTROL_SHADER, true, "glsl/bezier.tcs" },
-        //{ GL_TESS_EVALUATION_SHADER, true, "glsl/bezier.tes" },
-        //{ GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
-        { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
-        { GL_NONE },
-    };
-
-    shader_program = gl_createProgram(shaders);
-    if (!shader_program) {
-        return -1;
+    for (size_t i = 0; i < sizeof(test) / sizeof(Vec2); i++) {
+        path_addNode(&g_path, test[i]);
     }
-    glUseProgram(shader_program);
 
-    glUniform1f(glGetUniformLocation(shader_program, "strokeWidth2"), 0.01);
+    ui = ui_init();
 
     NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
     if (!vg) {
@@ -468,27 +330,23 @@ int main(void) {
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        double t = glfwGetTime();
-
         nvgBeginFrame(vg, WIDTH, HEIGHT, 1.0);
         nvgSave(vg);
-        drawGraph(vg, 0, HEIGHT/2, WIDTH, HEIGHT/2, t);
+
         nvgRestore(vg);
         nvgEndFrame(vg);
 
-        glUseProgram(shader_program);
-        glBindVertexArray(VAO);
+        ui_drawSpline(&ui, &g_path);
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
         // equal to the last. This will buffer overflow.
         //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, 4);
         //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, g_path.node_cnt+1);
 
-        //glPointSize(3.0f);
-        //glDrawArrays(GL_POINTS, 0, g_path.vertex_cnt);
-        glLineWidth(1.0f);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, g_path.vertex_cnt);
-        //glDrawArrays(GL_TRIANGLES, 0, g_path.node_cnt);
+        glEnable(GL_LINE_SMOOTH);
+        glPointSize(5.0f);
+        glDrawArrays(GL_POINTS, 0, g_path.node_cnt);
+        glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
         //glEnable(GL_LINE_SMOOTH);
         //glLineWidth(16.0f);
