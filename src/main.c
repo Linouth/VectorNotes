@@ -27,13 +27,21 @@ const double PI_2 = 1.57079632679489661923;
 #define WIDTH 800
 #define HEIGHT 600
 
+typedef struct rgb {
+    float r;
+    float g;
+    float b;
+} Rgb;
+
 enum vbo_type {
     VBO_spline,
+    VBO_debug,
     VBO_count,
 };
 
 enum vao_type {
     VAO_spline,
+    VAO_debug,
     VAO_count,
 };
 
@@ -52,6 +60,7 @@ typedef enum path_cmd {
 #define PATH_MAX_NODES 128 * 4
 typedef struct path {
     Vec2    nodes[PATH_MAX_NODES];
+    double  timestamps[PATH_MAX_NODES];
     size_t  node_cnt;
 
     PathCmd commands[PATH_MAX_NODES];
@@ -66,7 +75,10 @@ Path path_init() {
 
 void path_addNode(Path *path, Vec2 node) {
     assert(path->node_cnt < PATH_MAX_NODES);
-    path->nodes[path->node_cnt++] = node;
+    path->nodes[path->node_cnt] = node;
+    path->timestamps[path->node_cnt] = glfwGetTime();
+
+    path->node_cnt += 1;
 }
 
 Vec2* path_getNode(Path *path, int index) {
@@ -102,6 +114,10 @@ UI ui_init() {
 
         switch (i) {
         case VAO_spline:
+            glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
+            glEnableVertexAttribArray(0);
+            break;
+        case VAO_debug:
             glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
             glEnableVertexAttribArray(0);
             break;
@@ -146,6 +162,31 @@ void ui_drawSpline(UI *ui, Path *path) {
 
     glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_spline]);
     glBufferData(GL_ARRAY_BUFFER, path->node_cnt*sizeof(Vec2), path->nodes, GL_DYNAMIC_DRAW);
+
+    GLuint color_loc = glGetUniformLocation(ui->shader[SHADER_spline], "color");
+
+    glEnable(GL_LINE_SMOOTH);
+    glPointSize(4.0f);
+    glLineWidth(2.0f);
+
+    glUniform3f(color_loc, 0.173, 0.325, 0.749);
+    glDrawArrays(GL_LINE_STRIP, 0, path->node_cnt);
+    glUniform3f(color_loc, 0.70, 0.70, 0.70);
+    glDrawArrays(GL_POINTS, 0, path->node_cnt);
+}
+
+void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color) {
+    glUseProgram(ui->shader[SHADER_debug]);
+    glBindVertexArray(ui->vao[VAO_debug]);
+
+    glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_debug]);
+    glBufferData(GL_ARRAY_BUFFER, count*sizeof(Vec2), points, GL_DYNAMIC_DRAW);
+
+    GLuint color_loc = glGetUniformLocation(ui->shader[SHADER_debug], "color");
+    glUniform3f(color_loc, color.r, color.g, color.b);
+    glEnable(GL_LINE_SMOOTH);
+    glLineWidth(1.0f);
+    glDrawArrays(GL_LINES, 0, count);
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -176,6 +217,7 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     g_ypos = ypos;
 
     static Vec2 *prev_node = NULL;
+    static double prev_len = 0;
 
     if (g_mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
         if (!prev_node) {
@@ -187,17 +229,52 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
             .y = ypos,
         };
 
-        if (vec2_distSqr(*prev_node, curr) > 100) {
+        double cmp = 5.0;
+        double curr_len = 0;
+        if (g_path.node_cnt > 1) {
+            // The last two points, and a tangent vector determined from these
+            // points.
+            Vec2 p1 = g_path.nodes[g_path.node_cnt-1];
+            Vec2 p0 = g_path.nodes[g_path.node_cnt-2];
+            Vec2 tg = vec2_norm(vec2_sub(p1, p0));
+
+            // Vector from the last node to the cursor position.
+            Vec2 r = vec2_sub(curr, *prev_node);
+            curr_len = vec2_len(r);
+
+            // Indicator of angle between tangent vector and cursor vector.
+            // NOTE: tg is unit length
+            double alpha = vec2_dot(r, tg) / curr_len;
+
+            // Determine the length required for a new node to be placed.
+            // Line segments can be at most 'max_len' long, and min 'min_len' long.
+            // The exponent determines how aggressive the node-placing is.
+            const double max_len = 128.0;
+            const double min_len = 7.0;
+            const double exponent = 512.0;
+            //double cmp = 100 / (1 + pow(128, 4*alpha - 2)) + 10;
+            //double cmp = 100 * (1 - 1/(1 + pow(128, 100*alpha - 99.5))) + 8;
+            cmp = max_len*pow(alpha, exponent) + min_len;
+
+            // Whenever the cursor moves back, place a node to capture this movement
+            if (curr_len > prev_len)
+                prev_len = curr_len;
+        }
+
+        //if (fn < 0.7 && vec2_dist(*prev_node, curr) > 8) {
+        if (curr_len < (prev_len - 5.0) || vec2_dist(*prev_node, curr) > cmp) {
             //printf("Placing new node! %f %f\n", xpos, ypos);
             printf("{%f, %f}\n", xpos, ypos);
 
             path_addNode(&g_path, curr);
 
             prev_node = path_getNode(&g_path, -1);
+            prev_len = 0;
         }
     } else {
         // Mouse not held
         prev_node = NULL;
+        prev_len = 0;
     }
 }
 
@@ -220,7 +297,8 @@ static void set_viewport(int width, int height) {
 
     // TODO: Get rid of ui in global, and find a clean way to pass the view size
     // to the shader programs
-    glUniform2f(glGetUniformLocation(ui.shader[SHADER_spline], "view_size"), width, height);
+    glProgramUniform2f(ui.shader[SHADER_spline], glGetUniformLocation(ui.shader[SHADER_spline], "view_size"), width, height);
+    glProgramUniform2f(ui.shader[SHADER_debug], glGetUniformLocation(ui.shader[SHADER_debug], "view_size"), width, height);
 }
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
@@ -228,7 +306,7 @@ static void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 }
 
 static void glfwError(int id, const char* desc) {
-    printf("Error(GLFW): %s\n", desc);
+    fprintf(stderr, "Error(GLFW): %s\n", desc);
 }
 
 int main(void) {
@@ -318,35 +396,44 @@ int main(void) {
         path_addNode(&g_path, test[i]);
     }
 
-    ui = ui_init();
+    //NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
+    //if (!vg) {
+    //    return -2;
+    //}
 
-    NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
-    if (!vg) {
-        return -2;
-    }
+    ui = ui_init();
 
     glfwSetTime(0);
 
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        nvgBeginFrame(vg, WIDTH, HEIGHT, 1.0);
-        nvgSave(vg);
+        //nvgBeginFrame(vg, WIDTH, HEIGHT, 1.0);
+        //nvgSave(vg);
 
-        nvgRestore(vg);
-        nvgEndFrame(vg);
+        //nvgRestore(vg);
+        //nvgEndFrame(vg);
 
         ui_drawSpline(&ui, &g_path);
+
+        if (g_path.node_cnt > 1) {
+            Vec2 p1 = g_path.nodes[g_path.node_cnt-1];
+            Vec2 p0 = g_path.nodes[g_path.node_cnt-2];
+            Vec2 tg = vec2_norm(vec2_sub(p1, p0));
+
+            Vec2 points[] = {
+                p1,
+                vec2_add(p1, vec2_scalarMult(tg, 30.0)),
+            };
+            Rgb rgb = {1.0, 1.0, 1.0};
+
+            ui_drawDbgLines(&ui, points, 2, rgb);
+        }
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
         // equal to the last. This will buffer overflow.
         //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, 4);
         //glDrawArrays(GL_LINE_STRIP_ADJACENCY, 0, g_path.node_cnt+1);
-
-        glEnable(GL_LINE_SMOOTH);
-        glPointSize(5.0f);
-        glDrawArrays(GL_POINTS, 0, g_path.node_cnt);
-        glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
         //glEnable(GL_LINE_SMOOTH);
         //glLineWidth(16.0f);
