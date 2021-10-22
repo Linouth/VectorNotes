@@ -64,3 +64,7 @@ Vec2 vec2_norm(Vec2 v) {
     };
     return out;
 }
+
+Vec2 vec2_tangent(Vec2 v1, Vec2 v2) {
+    return vec2_norm(vec2_sub(v2, v1));
+}

@@ -25,6 +25,7 @@ typedef struct bezier_fit_ctx {
 
     BezierCoeffs *coeffs;
 
+    double corner_thresh;   // Min angle we define as a corner (in rad)
     double tangent_range;   // Range for point averaging for tangent calcs
     double epsilon;         // Max allowed error (distance between point and curve)
     double psi;             // Threshold at which to split curive into multiple
@@ -38,7 +39,4 @@ typedef struct bezier_fit_ctx {
 
 BezierFitCtx *fit_initCtx(Vec2 points[], size_t count);
 void fit_deinitCtx(BezierFitCtx *fit);
-void fit_addToNewPath(BezierFitCtx *fit, Vec2 point, int ts_index);
-Vec2 fit_calcTangent(BezierFitCtx *fit, size_t i_start, size_t i_end, FitDir dir);
-void fit_chordLengthParameterization(BezierFitCtx *fit, size_t i_start, size_t i_end);
-void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_start, size_t i_end);
+void fitCurve(BezierFitCtx *fit);

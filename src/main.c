@@ -136,42 +136,17 @@ Vec2* path_getNode(Path *path, int index) {
 }
 
 Path* path_fitBezier(Path *path, double epsilon, double psi, int max_iter) {
-    assert(path->node_cnt > 2);
+    assert(path->node_cnt > 1);
 
     BezierFitCtx *fit = fit_initCtx(path->nodes, path->node_cnt);
+    fit->timestamps = path->timestamps;
+    fit->corner_thresh = 0.873;
+    fit->tangent_range = 30.0;
     fit->epsilon = epsilon;
     fit->psi = psi;
     fit->max_iter = max_iter;
-    fit->timestamps = path->timestamps;
 
-    // TODO: Proper initial parameterization
-    //       Keep in mind that I want to tag the final points with real life
-    //       timestamps (derived from path->timestamps).
-    //       Check if it would add anything to use real timestamps instead of
-    //       chord-length initialization.
-    //double *params = fit->params;
-    //double u0 = path->timestamps[0];
-    //double uend = path->timestamps[path->node_cnt-1];
-    //for (size_t i = 0; i < path->node_cnt; i++) {
-    //    params[i] = (path->timestamps[i] - u0) / (uend - u0);
-    //}
-
-    fit_addToNewPath(fit, fit->points[0], 0);
-
-    // TODO: Analyze curve, find corners and split there, and process these
-    // separately
-
-    // Determine tangent vectors. It takes the average position of all points
-    // within fit->tangent_range units (default 30.0) from the end points and
-    // calculates the tangent going to that average point.
-    Vec2 t1 = fit_calcTangent(fit, 0, fit->count-1, FIT_DIR_RIGHT);
-    Vec2 t2 = fit_calcTangent(fit, 0, fit->count-1, FIT_DIR_LEFT);
-    // Calculate tangent, only looking at the neighboring point.
-    //Vec2 t1 = vec2_norm(vec2_sub(fit->points[1], fit->points[0]));
-    //Vec2 t2 = vec2_norm(vec2_sub(fit->points[fit->count-2], fit->points[fit->count-1]));
-
-    fit_chordLengthParameterization(fit, 0, fit->count-1);
-    fitBezier(fit, t1, t2, 0, 0, fit->count-1);
+    fitCurve(fit);
 
     Path *new = path_init(fit->new_cnt);
     memcpy(new->nodes, fit->new, fit->new_cnt * sizeof(Vec2));

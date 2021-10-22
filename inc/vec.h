@@ -15,3 +15,4 @@ double vec2_distSqr(Vec2 v1, Vec2 v2);
 double vec2_dist(Vec2 v1, Vec2 v2);
 double vec2_len(Vec2 v);
 Vec2 vec2_norm(Vec2 v);
+Vec2 vec2_tangent(Vec2 v1, Vec2 v2);
