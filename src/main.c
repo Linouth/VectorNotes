@@ -135,16 +135,18 @@ Vec2* path_getNode(Path *path, int index) {
     return NULL;
 }
 
-Path* path_fitBezier(Path *path, double epsilon, double psi, int max_iter) {
+Path* path_fitBezier(Path *path) {
     assert(path->node_cnt > 1);
 
+    // TODO: These parameters will have to depend on how far we are zoomed in,
+    // just like the frequency of sampling when drawing.
     BezierFitCtx *fit = fit_initCtx(path->nodes, path->node_cnt);
     fit->timestamps = path->timestamps;
-    fit->corner_thresh = 0.873;
+    fit->corner_thresh = PI / 4;
     fit->tangent_range = 30.0;
-    fit->epsilon = epsilon;
-    fit->psi = psi;
-    fit->max_iter = max_iter;
+    fit->epsilon = 4.0;
+    fit->psi = 16.0;
+    fit->max_iter = 5;
 
     fitCurve(fit);
 
@@ -338,7 +340,7 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
             printf("Refitting line\n");
             path_deinit(new);
             //new = path_fitBezier(g_path, 5.0, 25.0, 3);
-            new = path_fitBezier(g_path, 4.0, 19.0, 8);
+            new = path_fitBezier(g_path);
         }
     }
 
@@ -468,7 +470,7 @@ int main(void) {
     }
 
     //new = path_fitBezier(g_path, 5.0, 30.0, 4);
-    new = path_fitBezier(g_path, 4.0, 19.0, 8);
+    new = path_fitBezier(g_path);
     printf("New has %ld items\n", new->node_cnt);
 
     NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);

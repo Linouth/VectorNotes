@@ -60,6 +60,7 @@ void addToNewPath(BezierFitCtx *fit, Vec2 point, int ts_index) {
     if (fit->new_cnt >= fit->new_capacity) {
         fit->new = realloc(fit->new, sizeof(Vec2) * fit->new_capacity * 2);
         fit->new_ts = realloc(fit->new_ts, sizeof(double) * fit->new_capacity * 2);
+        fit->new_capacity *= 2;
 
         assert(fit->new != NULL);
         assert(fit->new_ts != NULL);
@@ -329,14 +330,17 @@ void startFit(BezierFitCtx *fit, size_t i_start, size_t i_end) {
 /**
  * Interface function. Calling this starts the whole operation (as long as fit
  * is initialized properly).
+ *
+ * It splits the curve into separate parts if the angle between tangent vectors
+ * is larger than `fit->corner_thresh` (this indicates a corner).
  */
 void fitCurve(BezierFitCtx *fit) {
     addToNewPath(fit, fit->points[0], 0);
 
     size_t i_start = 0;
-    for (size_t i = 1; i < fit->count-1; i++) {
-        Vec2 t01 = vec2_tangent(fit->points[i-1], fit->points[i]);
-        Vec2 t12 = vec2_tangent(fit->points[i], fit->points[i+1]);
+    for (size_t i = 2; i < fit->count-2; i++) {
+        Vec2 t01 = vec2_tangent(fit->points[i-2], fit->points[i]);
+        Vec2 t12 = vec2_tangent(fit->points[i], fit->points[i+2]);
 
         double cosa = vec2_dot(t01, t12) / (vec2_len(t01) * vec2_len(t12));
         double a = acos(cosa);
