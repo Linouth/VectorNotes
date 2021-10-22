@@ -278,45 +278,47 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
     }
     //printf("Level %d; Max distance error is %f at t=%f\n", level, sqrt(max_err), max_err_t);
 
-    if (max_err > fit->psi*fit->psi) {
-        // Error is very large, split the curve into multiple paths and try on
-        // these paths separately.
+    if (max_err < fit->epsilon*fit->epsilon) {
+        // Error is small enough, add curve to list and return;
 
-        //printf("Splitting! err=%f, i=%ld\n", sqrt(max_err), max_err_i);
+        Vec2 p = vec2_scalarMult(v0, fit->coeffs[max_err_i].B0);
+        p = vec2_add(p, vec2_scalarMult(v1, fit->coeffs[max_err_i].B1));
+        p = vec2_add(p, vec2_scalarMult(v2, fit->coeffs[max_err_i].B2));
+        p = vec2_add(p, vec2_scalarMult(v3, fit->coeffs[max_err_i].B3));
+        path_addNode(dbg, max_err_d, 0);
+        path_addNode(dbg, p, 0);
 
-        Vec2 t_split = vec2_norm(
-                vec2_scalarMult(vec2_add(
-                    vec2_sub(fit->points[max_err_i-1], fit->points[max_err_i]),
-                    vec2_sub(fit->points[max_err_i], fit->points[max_err_i+1])),
-                0.5));
-
-        chordLengthParameterization(fit, i_start, max_err_i);
-        fitBezier(fit, t1, t_split, level, i_start, max_err_i);
-
-        t_split = vec2_scalarMult(t_split, -1);
-        chordLengthParameterization(fit, max_err_i, i_end);
-        fitBezier(fit, t_split, t2, level, max_err_i, i_end);
+        addToNewPath(fit, v1, -1);
+        addToNewPath(fit, v2, -1);
+        addToNewPath(fit, v3, i_end);
         return;
-    } else if (max_err > fit->epsilon*fit->epsilon && level < fit->max_iter) {
+    } else if (max_err < fit->psi*fit->psi && level < fit->max_iter) {
         // The error is fairly small but still too large, try to improve by
         // reparameterizing.
 
         reparameterize(fit, v0, v1, v2, v3, i_start, i_end);
         fitBezier(fit, t1, t2, level+1, i_start, i_end);
         return;
-    };
-    // Error is small enough; continue
+    }
 
-    Vec2 p = vec2_scalarMult(v0, fit->coeffs[max_err_i].B0);
-    p = vec2_add(p, vec2_scalarMult(v1, fit->coeffs[max_err_i].B1));
-    p = vec2_add(p, vec2_scalarMult(v2, fit->coeffs[max_err_i].B2));
-    p = vec2_add(p, vec2_scalarMult(v3, fit->coeffs[max_err_i].B3));
-    path_addNode(dbg, max_err_d, 0);
-    path_addNode(dbg, p, 0);
+    // Error is very large, split the curve into multiple paths and try on
+    // these paths separately.
 
-    addToNewPath(fit, v1, -1);
-    addToNewPath(fit, v2, -1);
-    addToNewPath(fit, v3, i_end);
+    //printf("Splitting! err=%f, i=%ld\n", sqrt(max_err), max_err_i);
+
+    Vec2 t_split = vec2_norm(
+            vec2_scalarMult(vec2_add(
+                vec2_sub(fit->points[max_err_i-1], fit->points[max_err_i]),
+                vec2_sub(fit->points[max_err_i], fit->points[max_err_i+1])),
+            0.5));
+
+    chordLengthParameterization(fit, i_start, max_err_i);
+    fitBezier(fit, t1, t_split, level, i_start, max_err_i);
+
+    t_split = vec2_scalarMult(t_split, -1);
+    chordLengthParameterization(fit, max_err_i, i_end);
+    fitBezier(fit, t_split, t2, level, max_err_i, i_end);
+
 }
 
 void startFit(BezierFitCtx *fit, size_t i_start, size_t i_end) {
@@ -338,9 +340,9 @@ void fitCurve(BezierFitCtx *fit) {
     addToNewPath(fit, fit->points[0], 0);
 
     size_t i_start = 0;
-    for (size_t i = 2; i < fit->count-2; i++) {
-        Vec2 t01 = vec2_tangent(fit->points[i-2], fit->points[i]);
-        Vec2 t12 = vec2_tangent(fit->points[i], fit->points[i+2]);
+    for (size_t i = 1; i < fit->count-1; i++) {
+        Vec2 t01 = vec2_tangent(fit->points[i-1], fit->points[i]);
+        Vec2 t12 = vec2_tangent(fit->points[i], fit->points[i+1]);
 
         double cosa = vec2_dot(t01, t12) / (vec2_len(t01) * vec2_len(t12));
         double a = acos(cosa);

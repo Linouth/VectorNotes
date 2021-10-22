@@ -135,6 +135,9 @@ Vec2* path_getNode(Path *path, int index) {
     return NULL;
 }
 
+// TODO; Things to improve:
+// - Tangent calculation
+// - Possibly a quick filter over the input points to remove noise
 Path* path_fitBezier(Path *path) {
     assert(path->node_cnt > 1);
 
@@ -143,10 +146,10 @@ Path* path_fitBezier(Path *path) {
     BezierFitCtx *fit = fit_initCtx(path->nodes, path->node_cnt);
     fit->timestamps = path->timestamps;
     fit->corner_thresh = PI / 4;
-    fit->tangent_range = 30.0;
+    fit->tangent_range = 20.0;
     fit->epsilon = 4.0;
-    fit->psi = 16.0;
-    fit->max_iter = 5;
+    fit->psi = 25.0;
+    fit->max_iter = 4;
 
     fitCurve(fit);
 
@@ -279,6 +282,8 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 
     static int prev_state = 0;
 
+    //static double prev_time = 0;
+
     if (g_mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
         if (!prev_node) {
             prev_node = path_getNode(g_path, -1);
@@ -324,10 +329,14 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 
         //if (fn < 0.7 && vec2_dist(*prev_node, curr) > 8) {
         if (curr_len < (prev_len - 5.0) || vec2_dist(*prev_node, curr) > cmp) {
+        //glfwGetTime()
+        //double t = glfwGetTime();
+        //if (t - prev_time > 0.01) {
             path_addNode(g_path, curr, -1);
 
             prev_node = path_getNode(g_path, -1);
             prev_len = 0;
+            //prev_time = t;
         }
     } else {
         // Mouse not held
@@ -462,7 +471,7 @@ int main(void) {
         {667.000000, 324.000000},
         {667.000000, 335.000000},
         {665.000000, 345.000000},
-        //{557.0, 363.0},
+        {557.0, 363.0},
     };
 
     for (size_t i = 0; i < sizeof(test) / sizeof(Vec2); i++) {
