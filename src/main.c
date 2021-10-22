@@ -17,9 +17,11 @@
 #include <stdint.h>
 #include <assert.h>
 #include <math.h>
+#include <string.h>
 
 #include "vec.h"
 #include "gl.h"
+#include "fit_bezier.h"
 
 const double PI = 3.1415926535897932384626433832795;
 const double PI_2 = 1.57079632679489661923;
@@ -73,31 +75,53 @@ typedef struct ui {
     unsigned int width, height;
 } UI;
 
-#define PATH_MAX_NODES 128 * 4
+#define PATH_DEFAULT_CAPACITY 512
 typedef struct path {
     PathType    type;
-    Vec2        nodes[PATH_MAX_NODES];
-    double      timestamps[PATH_MAX_NODES];
+    Vec2        *nodes;
+    double      *timestamps;
     size_t      node_cnt;
-
-    PathCmd     commands[PATH_MAX_NODES];
+    size_t      capacity;
 } Path;
 
 UI ui;
 Path *g_path;
 Path *dbg;
+Path *new;
 
-Path* path_init() {
-    Path path = { 0 };
-    return calloc(1, sizeof(path));
+Path* path_init(size_t count) {
+    Path *path = calloc(1, sizeof(Path));
+    assert(path != NULL);
+
+    size_t capacity = count > 0 ? count : PATH_DEFAULT_CAPACITY;
+    path->nodes = malloc(sizeof(Vec2) * capacity);
+    path->timestamps = malloc(sizeof(double) * capacity);
+    path->capacity = capacity;
+
+    assert(path->nodes != NULL);
+    assert(path->timestamps != NULL);
+
+    return path;
 }
 
 void path_deinit(Path *path) {
     free(path);
 }
 
+void path_resize(Path *path, size_t new_capacity) {
+    path->nodes = realloc(path->nodes, sizeof(Vec2) * new_capacity);
+    path->timestamps = realloc(path->timestamps, sizeof(double) * new_capacity);
+    path->capacity = new_capacity;
+
+    assert(path->nodes != NULL);
+    assert(path->timestamps != NULL);
+}
+
 void path_addNode(Path *path, Vec2 node, double timestamp) {
-    assert(path->node_cnt < PATH_MAX_NODES);
+    if (path->node_cnt >= path->capacity) {
+        path_resize(path, path->capacity * 2);
+    }
+
     path->nodes[path->node_cnt] = node;
     path->timestamps[path->node_cnt] = timestamp < 0 ? glfwGetTime() : timestamp;
     path->node_cnt += 1;
@@ -111,260 +135,14 @@ Vec2* path_getNode(Path *path, int index) {
     return NULL;
 }
 
-typedef struct bezier_coeffs {
-    double B0;
-    double B1;
-    double B2;
-    double B3;
-
-    double dB0;
-    double dB1;
-    double dB2;
-
-    double ddB0;
-    double ddB1;
-} BezierCoeffs;
-
-typedef struct bezier_fit_ctx {
-    size_t  count;
-
-    Vec2    *points;
-    double  *params;
-
-    BezierCoeffs *coeffs;
-
-    double epsilon;
-    double psi;
-    unsigned max_iter;
-} BezierFitCtx;
-
-BezierFitCtx *initCtx(Vec2 points[], size_t count) {
-    BezierFitCtx *fit = malloc(sizeof(BezierFitCtx));
-    fit->count = count;
-    fit->points = points;
-    fit->params = malloc(sizeof(double) * count);
-    fit->coeffs = malloc(sizeof(BezierCoeffs) * count);
-
-    // Sane defaults
-    fit->epsilon = 8.0;
-    fit->psi = 30.0;
-    fit->max_iter = 3;
-
-    return fit;
-}
-
-void deinitCtx(BezierFitCtx *fit) {
-    free(fit->params);
-    free(fit->coeffs);
-    free(fit);
-}
-
-void calcCoefficients(BezierFitCtx *fit, size_t i_start, size_t i_end) {
-    assert(i_end < fit->count);
-    for (size_t i = i_start; i <= i_end; i++) {
-        BezierCoeffs *c = &fit->coeffs[i];
-        double u = fit->params[i];
-
-        double omu = 1-u;
-
-        c->B0 = omu*omu*omu;
-        c->B1 = 3*u * omu*omu;
-        c->B2 = 3*u*u * omu;
-        c->B3 = u*u*u;
-
-        c->dB0 = 3 * omu*omu;
-        c->dB1 = 6*u * omu;
-        c->dB2 = 3*u*u;
-
-        c->ddB0 = 6 * omu;
-        c->ddB1 = 6*u;
-    }
-}
-
-void chordLengthParameterization(BezierFitCtx *fit, size_t i_start, size_t i_end) {
-    fit->params[i_start] = 0.0;
-    for (size_t i = i_start+1; i <= i_end; i++) {
-        fit->params[i] = fit->params[i-1] + vec2_dist(fit->points[i], fit->points[i-1]);
-    }
-    for (size_t i = i_start+1; i <= i_end; i++) {
-        fit->params[i] = fit->params[i] / fit->params[i_end];
-    }
-}
-
-void reparameterize(BezierFitCtx *fit, Vec2 v0, Vec2 v1, Vec2 v2, Vec2 v3, size_t i_start, size_t i_end) {
-    assert(i_end < fit->count);
-    for (size_t i = i_start; i <= i_end; i++) {
-        double u = fit->params[i];
-        Vec2 d = fit->points[i];
-
-        double B0 = fit->coeffs[i].B0;
-        double B1 = fit->coeffs[i].B1;
-        double B2 = fit->coeffs[i].B2;
-        double B3 = fit->coeffs[i].B3;
-
-        double dB0 = fit->coeffs[i].dB0;
-        double dB1 = fit->coeffs[i].dB1;
-        double dB2 = fit->coeffs[i].dB2;
-
-        double ddB0 = fit->coeffs[i].dB0;
-        double ddB1 = fit->coeffs[i].dB1;
-
-        Vec2 Q = vec2_scalarMult(v0, B0);
-        Q = vec2_add(Q, vec2_scalarMult(v1, B1));
-        Q = vec2_add(Q, vec2_scalarMult(v2, B2));
-        Q = vec2_add(Q, vec2_scalarMult(v3, B3));
-
-        Vec2 dQ = vec2_scalarMult(vec2_sub(v1, v0), dB0);
-        dQ = vec2_add(dQ, vec2_scalarMult(vec2_sub(v2, v1), dB1));
-        dQ = vec2_add(dQ, vec2_scalarMult(vec2_sub(v3, v2), dB2));
-
-        Vec2 ddQ = vec2_scalarMult(
-                vec2_add(
-                    vec2_sub(v2, vec2_scalarMult(v1, 2)),
-                    v0),
-                ddB0);
-
-        ddQ = vec2_add(ddQ, vec2_scalarMult(
-                vec2_add(
-                    vec2_sub(v3, vec2_scalarMult(v1, 2)),
-                    v1),
-                ddB1));
-
-        double num = vec2_dot(vec2_sub(Q, d), dQ);
-        double denom = vec2_dot(dQ, dQ) + vec2_dot(vec2_sub(Q, d), ddQ);
-        fit->params[i] = u - (num / denom);
-    }
-    assert(fit->params[i_start] == 0);
-    assert(fit->params[i_end] == 1.00);
-}
-
-Vec2 calcBezier(BezierFitCtx *fit, unsigned index, Vec2 v0, Vec2 v1, Vec2 v2, Vec2 v3) {
-    Vec2 p = vec2_scalarMult(v0, fit->coeffs[index].B0);
-    p = vec2_add(p, vec2_scalarMult(v1, fit->coeffs[index].B1));
-    p = vec2_add(p, vec2_scalarMult(v2, fit->coeffs[index].B2));
-    p = vec2_add(p, vec2_scalarMult(v3, fit->coeffs[index].B3));
-    return p;
-}
-
-// TODO still:
-//  - Map t0 and tend to the final path.
-void fitBezier(BezierFitCtx *fit, Path* new, Vec2 t1, Vec2 t2, unsigned level, size_t i_start, size_t i_end) {
-    printf("fitBezier called; i_start=%ld, i_end=%ld\n", i_start, i_end);
-
-    assert(i_end < fit->count);
-    Vec2 v0 = fit->points[i_start];
-    Vec2 v3 = fit->points[i_end];
-
-    if (i_end - i_start == 1) {
-        // Only two points
-
-        double dist = vec2_dist(v0, v3) / 3.0;
-        printf("Only two points! %f\n", dist);
-        path_addNode(new, vec2_add(v0, vec2_scalarMult(t1, dist)), 0);
-        path_addNode(new, vec2_add(v3, vec2_scalarMult(t2, dist)), 0);
-        path_addNode(new, v3, fit->params[i_end]);
-        return;
-    }
-
-    double c11, c1221, c22, x1, x2;
-    c11 = c1221 = c22 = x1 = x2 = 0;
-
-    for (size_t i = i_start; i <= i_end; i++) {
-        Vec2 d = fit->points[i];
-
-        double B1 = fit->coeffs[i].B1;
-        double B2 = fit->coeffs[i].B2;
-
-        Vec2 A1 = vec2_scalarMult(t1, B1);
-        Vec2 A2 = vec2_scalarMult(t1, B2);
-
-        c11 += vec2_dot(A1, A1);
-        c1221 += vec2_dot(A1, A2);
-        c22 += vec2_dot(A2, A2);
-
-        Vec2 bisum = calcBezier(fit, i, v0, v0, v3, v3);
-
-        Vec2 sub = vec2_sub(d, bisum);
-        x1 += vec2_dot(sub, A1);
-        x2 += vec2_dot(sub, A2);
-    }
-
-    double a1 = (x1*c22 - c1221*x2) / (c11*c22 - c1221*c1221);
-    double a2 = (c11*x2 - x1*c1221) / (c11*c22 - c1221*c1221);
-
-    Vec2 v1 = vec2_add(v0, vec2_scalarMult(t1, a1));
-    Vec2 v2 = vec2_add(v3, vec2_scalarMult(t2, a2));
-    //printf("a1=%f, a2=%f\n", a1, a2);
-
-    // TODO: Store the calculated parameters in an array for reuse.
-    double max_err = 0;
-    double max_err_t = 0;
-    size_t max_err_i = 0;
-    Vec2 max_err_d = {0, 0};
-    for (size_t i = i_start; i <= i_end; i++) {
-        double t = fit->params[i]; // Only needed for Bn calcs, so can be removed now
-        Vec2 d = fit->points[i];
-
-        Vec2 p = calcBezier(fit, i, v0, v1, v2, v3);
-
-        double err = vec2_distSqr(d, p);
-        if (err > max_err) {
-            max_err = err;
-            max_err_t = t;
-            max_err_i = i;
-            max_err_d = d;
-        }
-    }
-    printf("Level %d; Max distance error is %f at t=%f\n", level, sqrt(max_err), max_err_t);
-
-    if (max_err > fit->psi*fit->psi) {
-        // Error is very large, split the curve into multiple paths and try on
-        // these paths separately.
-
-        printf("Splitting! err=%f, i=%ld\n", sqrt(max_err), max_err_i);
-
-        Vec2 t_split = vec2_norm(vec2_sub(fit->points[max_err_i-1], fit->points[max_err_i+1]));
-
-        chordLengthParameterization(fit, i_start, max_err_i);
-        calcCoefficients(fit, i_start, max_err_i);
-        fitBezier(fit, new, t1, t_split, level, i_start, max_err_i);
-
-        t_split = vec2_scalarMult(t_split, -1);
-        chordLengthParameterization(fit, max_err_i, i_end);
-        calcCoefficients(fit, max_err_i, i_end);
-        fitBezier(fit, new, t_split, t2, level, max_err_i, i_end);
-        return;
-    } else if (max_err > fit->epsilon*fit->epsilon && level < fit->max_iter) {
-        // The error is fairly small but still too large, try to improve by
-        // reparameterizing.
-
-        calcCoefficients(fit, i_start, i_end);
-        reparameterize(fit, v0, v1, v2, v3, i_start, i_end);
-        fitBezier(fit, new, t1, t2, level+1, i_start, i_end);
-        return;
-    };
-    // Error is small enough; continue
-
-    Vec2 p = vec2_scalarMult(v0, fit->coeffs[max_err_i].B0);
-    p = vec2_add(p, vec2_scalarMult(v1, fit->coeffs[max_err_i].B1));
-    p = vec2_add(p, vec2_scalarMult(v2, fit->coeffs[max_err_i].B2));
-    p = vec2_add(p, vec2_scalarMult(v3, fit->coeffs[max_err_i].B3));
-    path_addNode(dbg, max_err_d, 0);
-    path_addNode(dbg, p, 0);
-
-    //printf("{%f, %f}, {%f, %f},\n", v1.x, v1.y, v2.x, v2.y);
-    path_addNode(new, v1, -1);
-    path_addNode(new, v2, -1);
-    path_addNode(new, v3, fit->params[i_end]);
-}
-
-Path* fitPath(Path *path, double epsilon, double psi, int max_iter) {
+Path* path_fitBezier(Path *path, double epsilon, double psi, int max_iter) {
     assert(path->node_cnt > 2);
 
-    BezierFitCtx *fit = initCtx(path->nodes, path->node_cnt);
+    BezierFitCtx *fit = fit_initCtx(path->nodes, path->node_cnt);
     fit->epsilon = epsilon;
     fit->psi = psi;
     fit->max_iter = max_iter;
+    fit->timestamps = path->timestamps;
 
     // TODO: Proper initial parameterization
     //       Keep in mind that I want to tag the final points with real life
@@ -378,19 +156,30 @@ Path* fitPath(Path *path, double epsilon, double psi, int max_iter) {
     //    params[i] = (path->timestamps[i] - u0) / (uend - u0);
     //}
 
-    Path *new = path_init();
-    path_addNode(new, fit->points[0], fit->params[0]); // params[0] should always be 0
+    fit_addToNewPath(fit, fit->points[0], 0);
 
-    // TODO: See if the tangent can be better approximated
-    Vec2 t1 = vec2_norm(vec2_sub(fit->points[1], fit->points[0]));
-    Vec2 t2 = vec2_norm(vec2_sub(fit->points[fit->count-2], fit->points[fit->count-1]));
+    // TODO: Analyze curve, find corners and split there, and process these
+    // separately
 
-    chordLengthParameterization(fit, 0, fit->count-1);
-    calcCoefficients(fit, 0, fit->count-1);
-    fitBezier(fit, new, t1, t2, 0, 0, fit->count-1);
+    // Determine tangent vectors. It takes the average position of all points
+    // within fit->tangent_range units (default 30.0) from the end points and
+    // calculates the tangent going to that average point.
+    Vec2 t1 = fit_calcTangent(fit, 0, fit->count-1, FIT_DIR_RIGHT);
+    Vec2 t2 = fit_calcTangent(fit, 0, fit->count-1, FIT_DIR_LEFT);
+    // Calculate tangent, only looking at the neighboring point.
+    //Vec2 t1 = vec2_norm(vec2_sub(fit->points[1], fit->points[0]));
+    //Vec2 t2 = vec2_norm(vec2_sub(fit->points[fit->count-2], fit->points[fit->count-1]));
 
-    deinitCtx(fit);
+    fit_chordLengthParameterization(fit, 0, fit->count-1);
+    fitBezier(fit, t1, t2, 0, 0, fit->count-1);
 
+    Path *new = path_init(fit->new_cnt);
+    memcpy(new->nodes, fit->new, fit->new_cnt * sizeof(Vec2));
+    memcpy(new->timestamps, fit->new_ts, fit->new_cnt * sizeof(double));
+    new->node_cnt = fit->new_cnt;
+    new->capacity = fit->new_cnt;
+
+    fit_deinitCtx(fit);
     return new;
 }
 
@@ -511,6 +300,8 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     static Vec2 *prev_node = NULL;
     static double prev_len = 0;
 
+    static int prev_state = 0;
+
     if (g_mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
         if (!prev_node) {
             prev_node = path_getNode(g_path, -1);
@@ -547,6 +338,7 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
             //double cmp = 100 / (1 + pow(128, 4*alpha - 2)) + 10;
             //double cmp = 100 * (1 - 1/(1 + pow(128, 100*alpha - 99.5))) + 8;
             cmp = max_len*pow(alpha, exponent) + min_len;
+            //cmp = 10;
 
             // Whenever the cursor moves back, place a node to capture this movement
             if (curr_len > prev_len)
@@ -564,7 +356,18 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
         // Mouse not held
         prev_node = NULL;
         prev_len = 0;
+
+        if (prev_state == GLFW_PRESS) {
+            // Mouse was released
+
+            printf("Refitting line\n");
+            path_deinit(new);
+            //new = path_fitBezier(g_path, 5.0, 25.0, 3);
+            new = path_fitBezier(g_path, 4.0, 19.0, 8);
+        }
     }
+
+    prev_state = g_mouse_states[GLFW_MOUSE_BUTTON_LEFT];
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
@@ -601,8 +404,8 @@ static void glfwError(int id, const char* desc) {
 }
 
 int main(void) {
-    g_path = path_init();
-    dbg = path_init();
+    g_path = path_init(0);
+    dbg = path_init(0);
 
     glfwSetErrorCallback(&glfwError);
     glfwInit();
@@ -640,24 +443,24 @@ int main(void) {
         //{220.0, 400.0},
         //{400.0, 350.0},
 
-        //{465.000000, 323.000000},
-        //{463.000000, 313.000000},
-        //{461.000000, 303.000000},
-        //{459.000000, 293.000000},
-        //{457.000000, 283.000000},
-        //{457.000000, 272.000000},
-        //{457.000000, 260.000000},
-        //{457.000000, 249.000000},
-        //{458.000000, 239.000000},
-        //{460.000000, 229.000000},
-        //{463.000000, 219.000000},
-        //{467.000000, 209.000000},
-        //{472.000000, 199.000000},
-        //{479.000000, 191.000000},
-        //{487.000000, 183.000000},
-        //{496.000000, 177.000000},
-        //{507.000000, 173.000000},
-        //{517.000000, 171.000000},
+        {465.000000, 323.000000},
+        {463.000000, 313.000000},
+        {461.000000, 303.000000},
+        {459.000000, 293.000000},
+        {457.000000, 283.000000},
+        {457.000000, 272.000000},
+        {457.000000, 260.000000},
+        {457.000000, 249.000000},
+        {458.000000, 239.000000},
+        {460.000000, 229.000000},
+        {463.000000, 219.000000},
+        {467.000000, 209.000000},
+        {472.000000, 199.000000},
+        {479.000000, 191.000000},
+        {487.000000, 183.000000},
+        {496.000000, 177.000000},
+        {507.000000, 173.000000},
+        {517.000000, 171.000000},
         {529.000000, 171.000000},
         {539.000000, 172.000000},
         {549.000000, 175.000000},
@@ -682,13 +485,15 @@ int main(void) {
         {667.000000, 324.000000},
         {667.000000, 335.000000},
         {665.000000, 345.000000},
+        //{557.0, 363.0},
     };
 
     for (size_t i = 0; i < sizeof(test) / sizeof(Vec2); i++) {
         path_addNode(g_path, test[i], -1);
     }
 
-    Path *new = fitPath(g_path, 5.0, 30.0, 4);
+    //new = path_fitBezier(g_path, 5.0, 30.0, 4);
+    new = path_fitBezier(g_path, 4.0, 19.0, 8);
     printf("New has %ld items\n", new->node_cnt);
 
     NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
