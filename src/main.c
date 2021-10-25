@@ -146,10 +146,10 @@ Path* path_fitBezier(Path *path) {
     // just like the frequency of sampling when drawing.
     BezierFitCtx *fit = fit_initCtx(path->nodes, path->node_cnt);
     fit->timestamps = path->timestamps;
-    fit->corner_thresh = PI / 4;
+    fit->corner_thresh = PI / 6;
     fit->tangent_range = 20.0;
-    fit->epsilon = 10.0;
-    fit->psi = 45.0;
+    fit->epsilon = 15.0;
+    fit->psi = 60.0;
     fit->max_iter = 3;
 
     fitCurve(fit);
@@ -487,7 +487,6 @@ int main(void) {
         {667.000000, 324.000000},
         {667.000000, 335.000000},
         {665.000000, 345.000000},
-        //{557.0, 363.0},
     };
 
     for (size_t i = 0; i < sizeof(test) / sizeof(Vec2); i++) {
@@ -570,11 +569,11 @@ int main(void) {
             Rgb rgb = {1, 1, 1};
             ui_drawDbgLines(&ui, new->nodes, 6, rgb, 1.0f);
         }
+        */
         {
             Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
-            ui_drawDbgLines(&ui, dbg->nodes, dbg->node_cnt, rgb, 3.0);
+            ui_drawDbgLines(&ui, dbg->nodes, dbg->node_cnt, rgb, 1.0);
         }
-        */
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
         // equal to the last. This will buffer overflow.

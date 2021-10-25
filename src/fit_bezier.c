@@ -251,11 +251,23 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
         x2 += vec2_dot(sub, A2);
     }
 
-    double a1 = (x1*c22 - c1221*x2) / (c11*c22 - c1221*c1221);
-    double a2 = (c11*x2 - x1*c1221) / (c11*c22 - c1221*c1221);
+    double det_c = (c11*c22 - c1221*c1221);
+    double a1 = det_c == 0 ? 0 : (x1*c22 - c1221*x2) / det_c;
+    double a2 = det_c == 0 ? 0 : (c11*x2 - x1*c1221) / det_c;
 
-    Vec2 v1 = vec2_add(v0, vec2_scalarMult(t1, a1));
-    Vec2 v2 = vec2_add(v3, vec2_scalarMult(t2, a2));
+    Vec2 v1, v2;
+
+    // Hacky fix for wrong fits. If alpha is zero or negative, just assume that
+    // it is a straight line.
+    // TODO: See if something better is needed. We could split the line and see
+    // if it fits better.
+    double alpha_err = 1.0e-6 * vec2_dist(v0, v3);
+    if (a1 < alpha_err || a2 < alpha_err) {
+        a1 = a2 = vec2_dist(v0, v3) / 3.0;
+    }
+
+    v1 = vec2_add(v0, vec2_scalarMult(t1, a1));
+    v2 = vec2_add(v3, vec2_scalarMult(t2, a2));
 
     // Calculate the error (distance) between the curve and the points
     double max_err = 0;
@@ -278,6 +290,8 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
     }
     //printf("Level %d; Max distance error is %f at t=%f\n", level, sqrt(max_err), max_err_t);
 
+    // TODO: This error is scale dependent. Think of a solution so that a curve
+    // has the same error if it is scaled up / down
     if (max_err < fit->epsilon*fit->epsilon) {
         // Error is small enough, add curve to list and return;
 
