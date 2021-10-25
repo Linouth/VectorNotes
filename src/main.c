@@ -48,7 +48,8 @@ enum vao_type {
 };
 
 enum shader_type {
-    SHADER_spline,
+    SHADER_simple,
+    SHADER_stipple,
     SHADER_debug,
     SHADER_count,
 };
@@ -147,9 +148,9 @@ Path* path_fitBezier(Path *path) {
     fit->timestamps = path->timestamps;
     fit->corner_thresh = PI / 4;
     fit->tangent_range = 20.0;
-    fit->epsilon = 4.0;
-    fit->psi = 25.0;
-    fit->max_iter = 4;
+    fit->epsilon = 10.0;
+    fit->psi = 45.0;
+    fit->max_iter = 3;
 
     fitCurve(fit);
 
@@ -193,14 +194,21 @@ UI ui_init() {
     {
         Shader shaders[] = { // SHADER_spline
             { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
-            //{ GL_TESS_CONTROL_SHADER, true, "glsl/bezier.tcs" },
-            //{ GL_TESS_EVALUATION_SHADER, true, "glsl/bezier.tes" },
-            //{ GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
             { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
             { GL_NONE },
         };
 
-        ui.shader[SHADER_spline] = gl_createProgram(shaders);
+        ui.shader[SHADER_simple] = gl_createProgram(shaders);
+    }
+    {
+        Shader shaders[] = { // SHADER_spline
+            { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
+            { GL_GEOMETRY_SHADER, true, "glsl/stipple.gs" },
+            { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
+            { GL_NONE },
+        };
+
+        ui.shader[SHADER_stipple] = gl_createProgram(shaders);
     }
     {
         Shader shaders[] = { // SHADER_debug
@@ -218,22 +226,29 @@ UI ui_init() {
 }
 
 void ui_drawSpline(UI *ui, Path *path) {
-    glUseProgram(ui->shader[SHADER_spline]);
+    GLuint color_loc;
+
+    glUseProgram(ui->shader[SHADER_simple]);
     glBindVertexArray(ui->vao[VAO_spline]);
 
     glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_spline]);
     glBufferData(GL_ARRAY_BUFFER, path->node_cnt*sizeof(Vec2), path->nodes, GL_DYNAMIC_DRAW);
 
-    GLuint color_loc = glGetUniformLocation(ui->shader[SHADER_spline], "color");
+    glPointSize(4.0f);
+    color_loc = glGetUniformLocation(ui->shader[SHADER_simple], "color");
+
+    glUniform3f(color_loc, 0.70, 0.70, 0.70);
+    glDrawArrays(GL_POINTS, 0, path->node_cnt);
+
+
+    glUseProgram(ui->shader[SHADER_stipple]);
 
     glEnable(GL_LINE_SMOOTH);
-    glPointSize(4.0f);
-    glLineWidth(2.0f);
+    glLineWidth(1.0f);
+    color_loc = glGetUniformLocation(ui->shader[SHADER_stipple], "color");
 
     glUniform3f(color_loc, 0.173, 0.325, 0.749);
     glDrawArrays(GL_LINE_STRIP, 0, path->node_cnt);
-    glUniform3f(color_loc, 0.70, 0.70, 0.70);
-    glDrawArrays(GL_POINTS, 0, path->node_cnt);
 }
 
 void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color, float linewidth) {
@@ -375,7 +390,8 @@ static void set_viewport(int width, int height) {
 
     // TODO: Get rid of ui in global, and find a clean way to pass the view size
     // to the shader programs
-    glProgramUniform2f(ui.shader[SHADER_spline], glGetUniformLocation(ui.shader[SHADER_spline], "view_size"), width, height);
+    glProgramUniform2f(ui.shader[SHADER_simple], glGetUniformLocation(ui.shader[SHADER_simple], "view_size"), width, height);
+    glProgramUniform2f(ui.shader[SHADER_stipple], glGetUniformLocation(ui.shader[SHADER_stipple], "view_size"), width, height);
     glProgramUniform2f(ui.shader[SHADER_debug], glGetUniformLocation(ui.shader[SHADER_debug], "view_size"), width, height);
 }
 
@@ -471,16 +487,22 @@ int main(void) {
         {667.000000, 324.000000},
         {667.000000, 335.000000},
         {665.000000, 345.000000},
-        {557.0, 363.0},
+        //{557.0, 363.0},
     };
 
     for (size_t i = 0; i < sizeof(test) / sizeof(Vec2); i++) {
         path_addNode(g_path, test[i], -1);
     }
 
-    //new = path_fitBezier(g_path, 5.0, 30.0, 4);
     new = path_fitBezier(g_path);
     printf("New has %ld items\n", new->node_cnt);
+    for (size_t i = 0; i < new->node_cnt-1; i+=3) {
+        printf("{%f, %f}, {%f, %f}, {%f, %f}, {%f, %f},\n",
+                new->nodes[i+0].x, new->nodes[i+0].y,
+                new->nodes[i+1].x, new->nodes[i+1].y,
+                new->nodes[i+2].x, new->nodes[i+2].y,
+                new->nodes[i+3].x, new->nodes[i+3].y);
+    }
 
     NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
     if (!vg) {
@@ -527,8 +549,9 @@ int main(void) {
         nvgRestore(vg);
         nvgEndFrame(vg);
 
-        //ui_drawSpline(&ui, g_path);
+        ui_drawSpline(&ui, new);
 
+        /*
         if (g_path->node_cnt > 1) {
             Vec2 p1 = g_path->nodes[g_path->node_cnt-1];
             Vec2 p0 = g_path->nodes[g_path->node_cnt-2];
@@ -551,6 +574,7 @@ int main(void) {
             Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
             ui_drawDbgLines(&ui, dbg->nodes, dbg->node_cnt, rgb, 3.0);
         }
+        */
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
         // equal to the last. This will buffer overflow.

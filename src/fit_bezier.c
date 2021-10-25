@@ -313,11 +313,11 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
             0.5));
 
     chordLengthParameterization(fit, i_start, max_err_i);
-    fitBezier(fit, t1, t_split, level, i_start, max_err_i);
+    fitBezier(fit, t1, t_split, 0, i_start, max_err_i);
 
     t_split = vec2_scalarMult(t_split, -1);
     chordLengthParameterization(fit, max_err_i, i_end);
-    fitBezier(fit, t_split, t2, level, max_err_i, i_end);
+    fitBezier(fit, t_split, t2, 0, max_err_i, i_end);
 
 }
 
