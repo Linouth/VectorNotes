@@ -181,11 +181,7 @@ void reparameterize(BezierFitCtx *fit, Vec2 v0, Vec2 v1, Vec2 v2, Vec2 v3, size_
         double num = vec2_dot(vec2_sub(Q, d), dQ);
         double denom = vec2_dot(dQ, dQ) + vec2_dot(vec2_sub(Q, d), ddQ);
 
-        if (denom == 0.0f) {
-            fit->params[i] = u;
-        } else {
-            fit->params[i] = u - (num / denom);
-        }
+        fit->params[i] = (denom == 0.0) ? u : u - (num / denom);
     }
     assert(fit->params[i_start] == 0.0f);
     assert(fit->params[i_end] == 1.0f);
@@ -198,9 +194,10 @@ void reparameterize(BezierFitCtx *fit, Vec2 v0, Vec2 v1, Vec2 v2, Vec2 v3, size_
  * - If the error is large (> `fit->psi`), it will split the curve into two at
  *   the point of greatest error.
  * - If the error is smaller (> `fit->epsilon`), it will use Newton-Raphson
- *   iteration up to `fit->max_iter` times.
- * - If the error is smaller than `fit->epsilon`, or `fit->max_iter` was
- *   reached, the curve stored in `fit->new`.
+ *   iteration up to `fit->max_iter` times. If max_iter is reached, and the
+ *   error is still too large, the cruve is split at the point of greatest
+ *   error.
+ * - If the error is smaller than `fit->epsilon` the curve stored in `fit->new`.
  */
 void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_start, size_t i_end) {
     //printf("fitBezier called; i_start=%ld, i_end=%ld\n", i_start, i_end);
@@ -252,8 +249,8 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
     }
 
     double det_c = (c11*c22 - c1221*c1221);
-    double a1 = det_c == 0 ? 0 : (x1*c22 - c1221*x2) / det_c;
-    double a2 = det_c == 0 ? 0 : (c11*x2 - x1*c1221) / det_c;
+    double a1 = (det_c == 0) ? 0 : (x1*c22 - c1221*x2) / det_c;
+    double a2 = (det_c == 0) ? 0 : (c11*x2 - x1*c1221) / det_c;
 
     Vec2 v1, v2;
 
