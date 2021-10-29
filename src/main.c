@@ -33,145 +33,6 @@ Path *g_path;
 Path *dbg;
 Path *new;
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS) {
-        switch (key) {
-            case GLFW_KEY_ESCAPE:
-            case GLFW_KEY_Q:
-                glfwSetWindowShouldClose(window, true);
-                break;
-            case GLFW_KEY_M: {
-                    static int mode = 0;
-                    printf("%d\n", mode);
-                    glPolygonMode(GL_FRONT_AND_BACK, GL_POINT + mode);
-                    mode = (mode + 1) % 3;
-                } break;
-            default:
-                break;
-        }
-    }
-}
-
-#define NUM_MOUSE_STATES 8
-int g_mouse_states[NUM_MOUSE_STATES] = {0};
-double g_xpos, g_ypos;
-
-static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
-    g_xpos = xpos;
-    g_ypos = ypos;
-
-    static Vec2 *prev_node = NULL;
-    static double prev_len = 0;
-
-    static int prev_state = 0;
-
-    //static double prev_time = 0;
-
-    if (g_mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
-        if (!prev_node) {
-            prev_node = path_getNode(g_path, -1);
-        }
-
-        Vec2 curr = {
-            .x = xpos,
-            .y = ypos,
-        };
-
-        double cmp = 5.0;
-        double curr_len = 0;
-        if (g_path->node_cnt > 1) {
-            // The last two points, and a tangent vector determined from these
-            // points.
-            Vec2 p1 = g_path->nodes[g_path->node_cnt-1];
-            Vec2 p0 = g_path->nodes[g_path->node_cnt-2];
-            Vec2 tg = vec2_norm(vec2_sub(p1, p0));
-
-            // Vector from the last node to the cursor position.
-            Vec2 r = vec2_sub(curr, *prev_node);
-            curr_len = vec2_len(r);
-
-            // Indicator of angle between tangent vector and cursor vector.
-            // NOTE: tg is unit length
-            double alpha = vec2_dot(r, tg) / curr_len;
-
-            // Determine the length required for a new node to be placed.
-            // Line segments can be at most 'max_len' long, and min 'min_len' long.
-            // The exponent determines how aggressive the node-placing is.
-            const double max_len = 128.0;
-            const double min_len = 7.0;
-            const double exponent = 512.0;
-            //double cmp = 100 / (1 + pow(128, 4*alpha - 2)) + 10;
-            //double cmp = 100 * (1 - 1/(1 + pow(128, 100*alpha - 99.5))) + 8;
-            cmp = max_len*pow(alpha, exponent) + min_len;
-            //cmp = 10;
-
-            // Whenever the cursor moves back, place a node to capture this movement
-            if (curr_len > prev_len)
-                prev_len = curr_len;
-        }
-
-        //if (fn < 0.7 && vec2_dist(*prev_node, curr) > 8) {
-        if (curr_len < (prev_len - 5.0) || vec2_dist(*prev_node, curr) > cmp) {
-        //glfwGetTime()
-        //double t = glfwGetTime();
-        //if (t - prev_time > 0.01) {
-            path_addNode(g_path, curr, -1);
-
-            prev_node = path_getNode(g_path, -1);
-            prev_len = 0;
-            //prev_time = t;
-        }
-    } else {
-        // Mouse not held
-        prev_node = NULL;
-        prev_len = 0;
-
-        if (prev_state == GLFW_PRESS) {
-            // Mouse was released
-
-            printf("Refitting line\n");
-            path_deinit(new);
-            //new = path_fitBezier(g_path, 5.0, 25.0, 3);
-            new = path_fitBezier(g_path);
-        }
-    }
-
-    prev_state = g_mouse_states[GLFW_MOUSE_BUTTON_LEFT];
-}
-
-static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-    g_mouse_states[button] = action;
-
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        Vec2 node = {
-            .x = g_xpos,
-            .y = g_ypos,
-        };
-
-        path_addNode(g_path, node, -1);
-        printf("Added a node at %f %f\n", g_xpos, g_ypos);
-    }
-}
-
-static void set_viewport(int width, int height) {
-    glViewport(0, 0, width, height);
-
-    // TODO: Get rid of ui in global, and find a clean way to pass the view size
-    // to the shader programs
-    for (size_t i = 0; i < sizeof(ui->shader)/sizeof(GLuint); i++) {
-        glProgramUniform2f(
-                ui->shader[i],
-                glGetUniformLocation(ui->shader[i], "viewSize"),
-                width, height);
-    }
-}
-
-static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    set_viewport(width, height);
-    ui->width = width;
-    ui->height = height;
-}
-
 static void glfwError(int id, const char* desc) {
     fprintf(stderr, "Error(GLFW): %s\n", desc);
 }
@@ -182,33 +43,16 @@ int main(void) {
 
     glfwSetErrorCallback(&glfwError);
     glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    // Create window and context
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "VectorNotes", NULL, NULL);
-    if (window == NULL) {
-        printf("Failed to create GLFW window\n");
-        glfwTerminate();
-        return -1;
-    }
-    glfwMakeContextCurrent(window);
-
-    // Prepare GLAD
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        printf("Failed to initialize GLAD\n");
+    ui = ui_init(WIDTH, HEIGHT);
+    if (ui == NULL) {
         return -1;
     }
 
-    // Set viewport size, and callback function for when the size changes
-    glViewport(0, 0, WIDTH, HEIGHT);
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetMouseButtonCallback(window, mouse_button_callback);
-
-    // Configure user input callbacks
-    glfwSetKeyCallback(window, key_callback);
-    glfwSetCursorPosCallback(window, cursor_position_callback);
+    NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
+    if (!vg) {
+        return -2;
+    }
 
     Vec2 test[] = {
         //{400.0, 200.0},
@@ -274,16 +118,9 @@ int main(void) {
                 new->nodes[i+3].x, new->nodes[i+3].y);
     }
 
-    NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
-    if (!vg) {
-        return -2;
-    }
-
-    ui = ui_init();
-
     glfwSetTime(0);
 
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(ui->window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
         nvgBeginFrame(vg, ui->width, ui->height, 1.0);
@@ -360,7 +197,11 @@ int main(void) {
         //glLineWidth(5.0f);
         //glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
-        glfwSwapBuffers(window);
+        printf("x: %f, y: %f; bl: %d, br: %d\n", ui->mouse_pos.x, ui->mouse_pos.y,
+                ui->mouse_state[GLFW_MOUSE_BUTTON_LEFT],
+                ui->mouse_state[GLFW_MOUSE_BUTTON_RIGHT]);
+
+        glfwSwapBuffers(ui->window);
         glfwWaitEventsTimeout(0.016666);
     }
     path_deinit(g_path);

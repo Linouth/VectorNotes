@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #include <stdlib.h>
 
@@ -32,18 +33,21 @@ enum shader_type {
     SHADER_count,
 };
 
+#define NUM_MOUSE_STATES 8
 typedef struct ui_ctx {
+    GLFWwindow *window;
+
     GLuint vbo[VBO_count];
     GLuint vao[VAO_count];
     GLuint shader[SHADER_count];
 
     Vec2 mouse_pos;
-    int mouse_button, mouse_action;
+    int mouse_state[NUM_MOUSE_STATES];
 
     unsigned int width, height;
 } UI;
 
-UI *ui_init();
+UI *ui_init(unsigned width, unsigned height);
 void ui_deinit(UI *ui);
 void ui_drawSpline(UI *ui, Path *path);
 void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color, float linewidth);
