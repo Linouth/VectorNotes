@@ -22,248 +22,16 @@
 #include "vec.h"
 #include "gl.h"
 #include "fit_bezier.h"
-
-const double PI = 3.1415926535897932384626433832795;
-const double PI_2 = 1.57079632679489661923;
+#include "path.h"
+#include "ui.h"
 
 #define WIDTH 800
 #define HEIGHT 600
 
-typedef struct rgb {
-    float r;
-    float g;
-    float b;
-} Rgb;
-
-enum vbo_type {
-    VBO_spline,
-    VBO_debug,
-    VBO_count,
-};
-
-enum vao_type {
-    VAO_spline,
-    VAO_debug,
-    VAO_count,
-};
-
-enum shader_type {
-    SHADER_simple,
-    SHADER_stipple,
-    SHADER_debug,
-    SHADER_count,
-};
-
-typedef enum path_cmd {
-    PATHCMD_end,
-    PATHCMD_line_to,
-    PATHCMD_count,
-} PathCmd;
-
-typedef enum path_type {
-    PATHTYPE_line,
-    PATHTYPE_bezier,
-} PathType;
-
-typedef struct ui {
-    GLuint vbo[VBO_count];
-    GLuint vao[VAO_count];
-    GLuint shader[SHADER_count];
-
-    Vec2 mouse_pos;
-    int mouse_button, mouse_action;
-
-    unsigned int width, height;
-} UI;
-
-#define PATH_DEFAULT_CAPACITY 512
-typedef struct path {
-    PathType    type;
-    Vec2        *nodes;
-    double      *timestamps;
-    size_t      node_cnt;
-    size_t      capacity;
-} Path;
-
-UI ui;
+UI *ui;
 Path *g_path;
 Path *dbg;
 Path *new;
-
-Path* path_init(size_t count) {
-    Path *path = calloc(1, sizeof(Path));
-    assert(path != NULL);
-
-    size_t capacity = count > 0 ? count : PATH_DEFAULT_CAPACITY;
-    path->nodes = malloc(sizeof(Vec2) * capacity);
-    path->timestamps = malloc(sizeof(double) * capacity);
-    path->capacity = capacity;
-
-    assert(path->nodes != NULL);
-    assert(path->timestamps != NULL);
-
-    return path;
-}
-
-void path_deinit(Path *path) {
-    free(path);
-}
-
-void path_resize(Path *path, size_t new_capacity) {
-    path->nodes = realloc(path->nodes, sizeof(Vec2) * new_capacity);
-    path->timestamps = realloc(path->timestamps, sizeof(double) * new_capacity);
-    path->capacity = new_capacity;
-
-    assert(path->nodes != NULL);
-    assert(path->timestamps != NULL);
-}
-
-void path_addNode(Path *path, Vec2 node, double timestamp) {
-    if (path->node_cnt >= path->capacity) {
-        path_resize(path, path->capacity * 2);
-    }
-
-    path->nodes[path->node_cnt] = node;
-    path->timestamps[path->node_cnt] = timestamp < 0 ? glfwGetTime() : timestamp;
-    path->node_cnt += 1;
-}
-
-Vec2* path_getNode(Path *path, int index) {
-    int pos = index < 0 ? path->node_cnt + index : index;
-    if (pos < (int)path->node_cnt) {
-        return &path->nodes[pos];
-    }
-    return NULL;
-}
-
-// TODO; Things to improve:
-// - Tangent calculation
-// - Possibly a quick filter over the input points to remove noise
-Path* path_fitBezier(Path *path) {
-    assert(path->node_cnt > 1);
-
-    // TODO: These parameters will have to depend on how far we are zoomed in,
-    // just like the frequency of sampling when drawing.
-    BezierFitCtx *fit = fit_initCtx(path->nodes, path->node_cnt);
-    fit->timestamps = path->timestamps;
-    fit->corner_thresh = PI / 6;
-    fit->tangent_range = 20.0;
-    fit->epsilon = 15.0;
-    fit->psi = 60.0;
-    fit->max_iter = 3;
-
-    fitCurve(fit);
-
-    Path *new = path_init(fit->new_cnt);
-    memcpy(new->nodes, fit->new, fit->new_cnt * sizeof(Vec2));
-    memcpy(new->timestamps, fit->new_ts, fit->new_cnt * sizeof(double));
-    new->node_cnt = fit->new_cnt;
-    new->capacity = fit->new_cnt;
-
-    fit_deinitCtx(fit);
-    return new;
-}
-
-UI ui_init() {
-    UI ui = { 0 };
-
-    glGenVertexArrays(VAO_count, ui.vao);
-    glGenBuffers(VBO_count, ui.vbo);
-    for (int i = 0; i < VAO_count; i++) {
-        assert(i < VBO_count);
-        glBindVertexArray(ui.vao[i]);
-        glBindBuffer(GL_ARRAY_BUFFER, ui.vbo[i]);
-
-        switch (i) {
-        case VAO_spline:
-            glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
-            glEnableVertexAttribArray(0);
-            break;
-        case VAO_debug:
-            glVertexAttribPointer(0, 2, GL_DOUBLE, GL_FALSE, 0, 0);
-            glEnableVertexAttribArray(0);
-            break;
-
-        default: break;
-        }
-    }
-    glBindVertexArray(0);
-
-    // TODO: Check if createProgram was successful. Also, this could be done
-    // programmatically
-    {
-        Shader shaders[] = { // SHADER_spline
-            { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
-            { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
-            { GL_NONE },
-        };
-
-        ui.shader[SHADER_simple] = gl_createProgram(shaders);
-    }
-    {
-        Shader shaders[] = { // SHADER_spline
-            { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
-            { GL_GEOMETRY_SHADER, true, "glsl/stipple.gs" },
-            { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
-            { GL_NONE },
-        };
-
-        ui.shader[SHADER_stipple] = gl_createProgram(shaders);
-    }
-    {
-        Shader shaders[] = { // SHADER_debug
-            { GL_VERTEX_SHADER, true, "glsl/scale.vs" },
-            //{ GL_TESS_CONTROL_SHADER, true, "glsl/bezier.tcs" },
-            //{ GL_TESS_EVALUATION_SHADER, true, "glsl/bezier.tes" },
-            //{ GL_GEOMETRY_SHADER, true, "glsl/stroke.gs" },
-            { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
-            { GL_NONE },
-        };
-        ui.shader[SHADER_debug] = gl_createProgram(shaders);
-    }
-
-    return ui;
-}
-
-void ui_drawSpline(UI *ui, Path *path) {
-    GLuint color_loc;
-
-    glUseProgram(ui->shader[SHADER_simple]);
-    glBindVertexArray(ui->vao[VAO_spline]);
-
-    glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_spline]);
-    glBufferData(GL_ARRAY_BUFFER, path->node_cnt*sizeof(Vec2), path->nodes, GL_DYNAMIC_DRAW);
-
-    glPointSize(4.0f);
-    color_loc = glGetUniformLocation(ui->shader[SHADER_simple], "color");
-
-    glUniform3f(color_loc, 0.70, 0.70, 0.70);
-    glDrawArrays(GL_POINTS, 0, path->node_cnt);
-
-
-    glUseProgram(ui->shader[SHADER_stipple]);
-
-    glEnable(GL_LINE_SMOOTH);
-    glLineWidth(1.0f);
-    color_loc = glGetUniformLocation(ui->shader[SHADER_stipple], "color");
-
-    glUniform3f(color_loc, 0.173, 0.325, 0.749);
-    glDrawArrays(GL_LINE_STRIP, 0, path->node_cnt);
-}
-
-void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color, float linewidth) {
-    glUseProgram(ui->shader[SHADER_debug]);
-    glBindVertexArray(ui->vao[VAO_debug]);
-
-    glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_debug]);
-    glBufferData(GL_ARRAY_BUFFER, count*sizeof(Vec2), points, GL_DYNAMIC_DRAW);
-
-    GLuint color_loc = glGetUniformLocation(ui->shader[SHADER_debug], "color");
-    glUniform3f(color_loc, color.r, color.g, color.b);
-    glEnable(GL_LINE_SMOOTH);
-    glLineWidth(linewidth);
-    glDrawArrays(GL_LINES, 0, count);
-}
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action == GLFW_PRESS) {
@@ -390,15 +158,18 @@ static void set_viewport(int width, int height) {
 
     // TODO: Get rid of ui in global, and find a clean way to pass the view size
     // to the shader programs
-    glProgramUniform2f(ui.shader[SHADER_simple], glGetUniformLocation(ui.shader[SHADER_simple], "view_size"), width, height);
-    glProgramUniform2f(ui.shader[SHADER_stipple], glGetUniformLocation(ui.shader[SHADER_stipple], "view_size"), width, height);
-    glProgramUniform2f(ui.shader[SHADER_debug], glGetUniformLocation(ui.shader[SHADER_debug], "view_size"), width, height);
+    for (size_t i = 0; i < sizeof(ui->shader)/sizeof(GLuint); i++) {
+        glProgramUniform2f(
+                ui->shader[i],
+                glGetUniformLocation(ui->shader[i], "viewSize"),
+                width, height);
+    }
 }
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     set_viewport(width, height);
-    ui.width = width;
-    ui.height = height;
+    ui->width = width;
+    ui->height = height;
 }
 
 static void glfwError(int id, const char* desc) {
@@ -515,7 +286,7 @@ int main(void) {
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        nvgBeginFrame(vg, ui.width, ui.height, 1.0);
+        nvgBeginFrame(vg, ui->width, ui->height, 1.0);
         nvgSave(vg);
 
         Vec2 *node = NULL;
@@ -548,7 +319,7 @@ int main(void) {
         nvgRestore(vg);
         nvgEndFrame(vg);
 
-        ui_drawSpline(&ui, new);
+        ui_drawSpline(ui, new);
 
         /*
         if (g_path->node_cnt > 1) {
@@ -572,7 +343,7 @@ int main(void) {
         */
         {
             Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
-            ui_drawDbgLines(&ui, dbg->nodes, dbg->node_cnt, rgb, 1.0);
+            ui_drawDbgLines(ui, dbg->nodes, dbg->node_cnt, rgb, 1.0);
         }
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
@@ -594,6 +365,8 @@ int main(void) {
     }
     path_deinit(g_path);
     path_deinit(new);
+
+    ui_deinit(ui);
 
     glfwTerminate();
     return 0;

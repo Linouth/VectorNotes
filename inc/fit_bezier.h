@@ -37,6 +37,6 @@ typedef struct bezier_fit_ctx {
     size_t new_capacity;
 } BezierFitCtx;
 
-BezierFitCtx *fit_initCtx(Vec2 points[], size_t count);
-void fit_deinitCtx(BezierFitCtx *fit);
+BezierFitCtx *fit_init(Vec2 points[], size_t count);
+void fit_deinit(BezierFitCtx *fit);
 void fitCurve(BezierFitCtx *fit);

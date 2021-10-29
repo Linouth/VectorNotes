@@ -14,7 +14,7 @@ OBJ = $(SRC:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
 CFLAGS = -std=c18 -Werror -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -g $(INC_FLAGS)
 LDFLAGS =
-LDLIBS = -lglfw -ldl
+LDLIBS = -lm -lglfw -ldl
 
 $(BIN): $(OBJ)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@

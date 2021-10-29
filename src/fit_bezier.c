@@ -15,7 +15,7 @@ typedef struct path Path;
 void path_addNode(Path *path, Vec2 node, double timestamp);
 extern Path *dbg;
 
-BezierFitCtx *fit_initCtx(Vec2 points[], size_t count) {
+BezierFitCtx *fit_init(Vec2 points[], size_t count) {
     BezierFitCtx *fit = malloc(sizeof(BezierFitCtx));
     assert(fit != NULL);
 
@@ -45,7 +45,7 @@ BezierFitCtx *fit_initCtx(Vec2 points[], size_t count) {
     return fit;
 }
 
-void fit_deinitCtx(BezierFitCtx *fit) {
+void fit_deinit(BezierFitCtx *fit) {
     free(fit->params);
     free(fit->coeffs);
     free(fit->new);
