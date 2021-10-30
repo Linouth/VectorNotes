@@ -8,8 +8,8 @@
 #include <GLFW/glfw3.h>
 
 #include "nanovg/nanovg.h"
-#define NANOVG_GL3_IMPLEMENTATION
-#include "nanovg/nanovg_gl.h"
+//#define NANOVG_GL3_IMPLEMENTATION
+//#include "nanovg/nanovg_gl.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -47,11 +47,6 @@ int main(void) {
     ui = ui_init(WIDTH, HEIGHT);
     if (ui == NULL) {
         return -1;
-    }
-
-    NVGcontext *vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
-    if (!vg) {
-        return -2;
     }
 
     Vec2 test[] = {
@@ -120,43 +115,51 @@ int main(void) {
 
     glfwSetTime(0);
 
+    Path *paths[16];
+    size_t path_cnt = 0;
+
+    NVGcontext *vg = ui->vg;
+
     while (!glfwWindowShouldClose(ui->window)) {
+        if (ui->tmp_path_ready && path_cnt < 16) {
+            paths[path_cnt] = path_fitBezier(ui->tmp_path);
+            ui->tmp_path_ready = false;
+
+            path_cnt += 1;
+        }
+
         glClear(GL_COLOR_BUFFER_BIT);
 
-        nvgBeginFrame(vg, ui->width, ui->height, 1.0);
+        nvgBeginFrame(vg, ui->view_width, ui->view_height, 1.0);
         nvgSave(vg);
+        {
+            nvgLineCap(vg, NVG_ROUND);
+            nvgLineJoin(vg, NVG_MITER);
+            nvgStrokeWidth(vg, 2.0f);
+            nvgStrokeColor(vg, nvgRGBA(82, 144, 242, 255));
 
-        Vec2 *node = NULL;
-        node = &g_path->nodes[0];
+            Vec2 *node = NULL;
+            node = &g_path->nodes[0];
 
-        nvgLineCap(vg, NVG_ROUND);
-        nvgLineJoin(vg, NVG_MITER);
-        nvgStrokeWidth(vg, 2.0f);
-        nvgStrokeColor(vg, nvgRGBA(82, 144, 242, 255));
+            ui_drawLines(ui, g_path);
 
-        nvgBeginPath(vg);
-        nvgMoveTo(vg, node->x, node->y);
-        for (size_t i = 1; i < g_path->node_cnt; i++) {
-            node = &g_path->nodes[i];
-            nvgLineTo(vg, node->x, node->y);
+            ui_drawPath(ui, new);
+
+            if (ui->tmp_path && ui->tmp_path->node_cnt >= 2) {
+                ui_drawLines(ui, ui->tmp_path);
+            }
+
+            for (size_t i = 0; i < path_cnt; i++) {
+                ui_drawPath(ui, paths[i]);
+            }
         }
-        nvgStroke(vg);
-
-        nvgBeginPath(vg);
-        nvgStrokeColor(vg, nvgRGBA(230, 20, 15, 255));
-        nvgMoveTo(vg, new->nodes[0].x, new->nodes[0].y);
-        for (size_t i = 1; i < new->node_cnt; i+=3) {
-            nvgBezierTo(vg,
-                    new->nodes[i].x, new->nodes[i].y,
-                    new->nodes[i+1].x, new->nodes[i+1].y,
-                    new->nodes[i+2].x, new->nodes[i+2].y);
-        }
-        nvgStroke(vg);
-
         nvgRestore(vg);
         nvgEndFrame(vg);
 
-        ui_drawSpline(ui, new);
+        ui_drawCtrlPoints(ui, new);
+        for (size_t i = 0; i < path_cnt; i++) {
+            ui_drawCtrlPoints(ui, paths[i]);
+        }
 
         /*
         if (g_path->node_cnt > 1) {
@@ -197,9 +200,10 @@ int main(void) {
         //glLineWidth(5.0f);
         //glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
-        printf("x: %f, y: %f; bl: %d, br: %d\n", ui->mouse_pos.x, ui->mouse_pos.y,
-                ui->mouse_state[GLFW_MOUSE_BUTTON_LEFT],
-                ui->mouse_state[GLFW_MOUSE_BUTTON_RIGHT]);
+        printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f\n", ui->mouse_pos.x, ui->mouse_pos.y,
+                ui->mouse_states[GLFW_MOUSE_BUTTON_LEFT],
+                ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT],
+                ui->view_origin.x, ui->view_origin.y);
 
         glfwSwapBuffers(ui->window);
         glfwWaitEventsTimeout(0.016666);

@@ -1,9 +1,14 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include "nanovg/nanovg.h"
+#define NANOVG_GL3_IMPLEMENTATION
+#include "nanovg/nanovg_gl.h"
+
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "gl.h"
 #include "path.h"
@@ -12,20 +17,32 @@
 
 UI g_ui = {0};
 
-static void setViewport(unsigned width, unsigned height) {
-    UI *ui = &g_ui;
-
+static void setViewport(UI *ui, unsigned width, unsigned height) {
     glViewport(0, 0, width, height);
 
-    ui->width = width;
-    ui->height = height;
+    ui->view_width = width;
+    ui->view_height = height;
 
-    for (size_t i = 0; i < sizeof(ui->shader)/sizeof(GLuint); i++) {
+    for (size_t i = 0; i < sizeof(ui->shaders)/sizeof(GLuint); i++) {
         glProgramUniform2f(
-                ui->shader[i],
-                glGetUniformLocation(ui->shader[i], "viewSize"),
+                ui->shaders[i],
+                glGetUniformLocation(ui->shaders[i], "viewSize"),
                 width, height);
     }
+}
+
+static Vec2 canvasToScreen(UI *ui, Vec2 point) {
+    return vec2_sub(point, ui->view_origin);
+}
+
+static void canvasToScreenN(UI *ui, Vec2 *dest, Vec2 *src, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        dest[i] = canvasToScreen(ui, src[i]);
+    }
+}
+
+static Vec2 screenToCanvas(UI *ui, Vec2 point) {
+    return vec2_add(point, ui->view_origin);
 }
 
 static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -36,11 +53,11 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
                 glfwSetWindowShouldClose(window, true);
                 break;
             case GLFW_KEY_M: {
-                    static int mode = 0;
-                    printf("%d\n", mode);
-                    glPolygonMode(GL_FRONT_AND_BACK, GL_POINT + mode);
-                    mode = (mode + 1) % 3;
-                } break;
+                static int mode = 0;
+                printf("%d\n", mode);
+                glPolygonMode(GL_FRONT_AND_BACK, GL_POINT + mode);
+                mode = (mode + 1) % 3;
+            } break;
             default:
                 break;
         }
@@ -56,35 +73,27 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
     ui->mouse_pos.x = xpos;
     ui->mouse_pos.y = ypos;
 
-    /*
     static Vec2 *prev_node = NULL;
     static double prev_len = 0;
 
-    static int prev_state = 0;
-
-    //static double prev_time = 0;
-
-    if (g_mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
+    if (ui->mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
         if (!prev_node) {
-            prev_node = path_getNode(g_path, -1);
+            prev_node = path_getNode(ui->tmp_path, -1);
         }
 
-        Vec2 curr = {
-            .x = xpos,
-            .y = ypos,
-        };
-
+        // TODO: This should probably be in some 'pencil' tool module. Maybe
+        // have callback functions per tool
         double cmp = 5.0;
         double curr_len = 0;
-        if (g_path->node_cnt > 1) {
-            // The last two points, and a tangent vector determined from these
-            // points.
-            Vec2 p1 = g_path->nodes[g_path->node_cnt-1];
-            Vec2 p0 = g_path->nodes[g_path->node_cnt-2];
-            Vec2 tg = vec2_norm(vec2_sub(p1, p0));
+        if (ui->tmp_path->node_cnt > 1) {
+            // The last two points, and a tangent vector determined from
+            // these points.
+            Vec2 *p1 = path_getNode(ui->tmp_path, -1);
+            Vec2 *p0 = path_getNode(ui->tmp_path, -2);
+            Vec2 tg = vec2_norm(vec2_sub(*p1, *p0));
 
             // Vector from the last node to the cursor position.
-            Vec2 r = vec2_sub(curr, *prev_node);
+            Vec2 r = vec2_sub(ui->mouse_pos, *prev_node);
             curr_len = vec2_len(r);
 
             // Indicator of angle between tangent vector and cursor vector.
@@ -107,58 +116,54 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
                 prev_len = curr_len;
         }
 
-        //if (fn < 0.7 && vec2_dist(*prev_node, curr) > 8) {
-        if (curr_len < (prev_len - 5.0) || vec2_dist(*prev_node, curr) > cmp) {
-        //glfwGetTime()
-        //double t = glfwGetTime();
-        //if (t - prev_time > 0.01) {
-            path_addNode(g_path, curr, -1);
+        if (curr_len < (prev_len - 5.0) || vec2_dist(*prev_node, ui->mouse_pos) > cmp) {
+            Vec2 p = screenToCanvas(ui, ui->mouse_pos);
+            path_addNode(ui->tmp_path, p, -1);
 
-            prev_node = path_getNode(g_path, -1);
+            prev_node = path_getNode(ui->tmp_path, -1);
             prev_len = 0;
-            //prev_time = t;
         }
-    } else {
-        // Mouse not held
-        prev_node = NULL;
-        prev_len = 0;
-
-        if (prev_state == GLFW_PRESS) {
-            // Mouse was released
-
-            printf("Refitting line\n");
-            path_deinit(new);
-            //new = path_fitBezier(g_path, 5.0, 25.0, 3);
-            new = path_fitBezier(g_path);
-        }
+    } else if (ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT] == GLFW_PRESS) {
+        Vec2 r = vec2_sub(ui->mouse_pos, ui->mouse_pos_rc);
+        ui->view_origin.x = -r.x;
+        ui->view_origin.y = -r.y;
     }
-
-    prev_state = g_mouse_states[GLFW_MOUSE_BUTTON_LEFT];
-    */
 }
 
 static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
     UI *ui = &g_ui;
 
-    ui->mouse_state[button] = action;
+    ui->mouse_states[button] = action;
 
-    //if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-    //    Vec2 node = {
-    //        .x = g_xpos,
-    //        .y = g_ypos,
-    //    };
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (action == GLFW_PRESS) {
+            // Button pressed, clear path and start over
+            // TODO: Probably better to just set count to 0
+            if (ui->tmp_path)
+                path_deinit(ui->tmp_path);
 
-    //    path_addNode(g_path, node, -1);
-    //    printf("Added a node at %f %f\n", g_xpos, g_ypos);
-    //}
+            ui->tmp_path = path_init(0);
+            ui->tmp_path_ready = false;
+        } else {
+            // Button released
+            ui->tmp_path_ready = true;
+        }
+
+        // Button pressed or released, place point at cursor pos
+        Vec2 p = screenToCanvas(ui, ui->mouse_pos);
+        path_addNode(ui->tmp_path, p, -1);
+        printf("Added a node at %f %f\n",
+                p.x, p.y);
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == GLFW_PRESS) {
+            ui->mouse_pos_rc = screenToCanvas(ui, ui->mouse_pos);
+        }
+    }
 }
 
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
     UI *ui = &g_ui;
-
-    setViewport(width, height);
-    ui->width = width;
-    ui->height = height;
+    setViewport(ui, width, height);
 }
 
 UI *ui_init(unsigned width, unsigned height) {
@@ -184,7 +189,7 @@ UI *ui_init(unsigned width, unsigned height) {
             return NULL;
         }
 
-        setViewport(width, height);
+        setViewport(ui, width, height);
 
         glfwSetFramebufferSizeCallback(ui->window, framebufferSizeCallback);
         glfwSetKeyCallback(ui->window, keyCallback);
@@ -192,12 +197,12 @@ UI *ui_init(unsigned width, unsigned height) {
         glfwSetCursorPosCallback(ui->window, mousePositionCallback);
     }
 
-    glGenVertexArrays(VAO_count, ui->vao);
-    glGenBuffers(VBO_count, ui->vbo);
+    glGenVertexArrays(VAO_count, ui->vaos);
+    glGenBuffers(VBO_count, ui->vbos);
     for (int i = 0; i < VAO_count; i++) {
         assert(i < VBO_count);
-        glBindVertexArray(ui->vao[i]);
-        glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[i]);
+        glBindVertexArray(ui->vaos[i]);
+        glBindBuffer(GL_ARRAY_BUFFER, ui->vbos[i]);
 
         switch (i) {
         case VAO_spline:
@@ -223,7 +228,7 @@ UI *ui_init(unsigned width, unsigned height) {
             { GL_NONE },
         };
 
-        ui->shader[SHADER_simple] = gl_createProgram(shaders);
+        ui->shaders[SHADER_simple] = gl_createProgram(shaders);
     }
     {
         Shader shaders[] = { // SHADER_spline
@@ -233,7 +238,7 @@ UI *ui_init(unsigned width, unsigned height) {
             { GL_NONE },
         };
 
-        ui->shader[SHADER_stipple] = gl_createProgram(shaders);
+        ui->shaders[SHADER_stipple] = gl_createProgram(shaders);
     }
     {
         Shader shaders[] = { // SHADER_debug
@@ -244,60 +249,114 @@ UI *ui_init(unsigned width, unsigned height) {
             { GL_FRAGMENT_SHADER, true, "glsl/simple.fs" },
             { GL_NONE },
         };
-        ui->shader[SHADER_debug] = gl_createProgram(shaders);
+        ui->shaders[SHADER_debug] = gl_createProgram(shaders);
     }
+
+    ui->vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
+    if (!ui->vg)
+        return NULL;
 
     return ui;
 }
 
 void ui_deinit(UI *ui) {
-    for (size_t i = 0; i < sizeof(ui->shader)/sizeof(GLuint); i++) {
-        glDeleteProgram(ui->shader[i]);
+    for (size_t i = 0; i < sizeof(ui->shaders)/sizeof(GLuint); i++) {
+        glDeleteProgram(ui->shaders[i]);
     }
-    glDeleteBuffers(sizeof(ui->vbo)/sizeof(GLuint), ui->vbo);
-    glDeleteVertexArrays(sizeof(ui->vao)/sizeof(GLuint), ui->vao);
+    glDeleteBuffers(sizeof(ui->vbos)/sizeof(GLuint), ui->vbos);
+    glDeleteVertexArrays(sizeof(ui->vaos)/sizeof(GLuint), ui->vaos);
 
     glfwDestroyWindow(ui->window);
+
+    if (ui->tmp_path)
+        path_deinit(ui->tmp_path);
+
+    if (ui->vg)
+        nvgDeleteGL3(ui->vg);
 
     //free(ui);
 }
 
-void ui_drawSpline(UI *ui, Path *path) {
+void ui_drawPath(UI *ui, Path *path) {
+    assert(ui->vg != NULL);
+
+    nvgBeginPath(ui->vg);
+    nvgStrokeColor(ui->vg, nvgRGBA(230, 20, 15, 255));
+
+    Vec2 p = canvasToScreen(ui, path->nodes[0]);
+    nvgMoveTo(ui->vg, p.x, p.y);
+    for (size_t j = 1; j < path->node_cnt; j+=3) {
+        Vec2 p0 = canvasToScreen(ui, path->nodes[j]);
+        Vec2 p1 = canvasToScreen(ui, path->nodes[j+1]);
+        Vec2 p2 = canvasToScreen(ui, path->nodes[j+2]);
+
+        nvgBezierTo(ui->vg,
+                p0.x, p0.y,
+                p1.x, p1.y,
+                p2.x, p2.y);
+    }
+    nvgStroke(ui->vg);
+}
+
+void ui_drawLines(UI *ui, Path *path) {
+    nvgBeginPath(ui->vg);
+    nvgStrokeColor(ui->vg, nvgRGBA(82, 144, 242, 255));
+
+    Vec2 p = canvasToScreen(ui, path->nodes[0]);
+    nvgMoveTo(ui->vg, p.x, p.y);
+    for (size_t i = 1; i < path->node_cnt; i++) {
+        p = canvasToScreen(ui, path->nodes[i]);
+        nvgLineTo(ui->vg, p.x, p.y);
+    }
+    nvgStroke(ui->vg);
+}
+
+void ui_drawCtrlPoints(UI *ui, Path *path) {
     GLuint color_loc;
 
-    glUseProgram(ui->shader[SHADER_simple]);
-    glBindVertexArray(ui->vao[VAO_spline]);
+    Vec2 *nodes = malloc(sizeof(Vec2) * path->node_cnt);
+    canvasToScreenN(ui, nodes, path->nodes, path->node_cnt);
 
-    glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_spline]);
-    glBufferData(GL_ARRAY_BUFFER, path->node_cnt*sizeof(Vec2), path->nodes, GL_DYNAMIC_DRAW);
+    glUseProgram(ui->shaders[SHADER_simple]);
+    glBindVertexArray(ui->vaos[VAO_spline]);
+
+    glBindBuffer(GL_ARRAY_BUFFER, ui->vbos[VBO_spline]);
+    glBufferData(GL_ARRAY_BUFFER, path->node_cnt*sizeof(Vec2), nodes, GL_DYNAMIC_DRAW);
 
     glPointSize(4.0f);
-    color_loc = glGetUniformLocation(ui->shader[SHADER_simple], "color");
+    color_loc = glGetUniformLocation(ui->shaders[SHADER_simple], "color");
 
     glUniform3f(color_loc, 0.70, 0.70, 0.70);
     glDrawArrays(GL_POINTS, 0, path->node_cnt);
 
 
-    glUseProgram(ui->shader[SHADER_stipple]);
+    glUseProgram(ui->shaders[SHADER_stipple]);
 
     glEnable(GL_LINE_SMOOTH);
     glLineWidth(1.0f);
-    color_loc = glGetUniformLocation(ui->shader[SHADER_stipple], "color");
+    color_loc = glGetUniformLocation(ui->shaders[SHADER_stipple], "color");
 
     glUniform3f(color_loc, 0.173, 0.325, 0.749);
     glDrawArrays(GL_LINE_STRIP, 0, path->node_cnt);
+
+    free(nodes);
 }
 
 void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color, float linewidth) {
-    glUseProgram(ui->shader[SHADER_debug]);
-    glBindVertexArray(ui->vao[VAO_debug]);
+    Vec2 *p = malloc(sizeof(Vec2) * count);
+    canvasToScreenN(ui, p, points, count);
 
-    glBindBuffer(GL_ARRAY_BUFFER, ui->vbo[VBO_debug]);
-    glBufferData(GL_ARRAY_BUFFER, count*sizeof(Vec2), points, GL_DYNAMIC_DRAW);
+    glUseProgram(ui->shaders[SHADER_debug]);
+    glBindVertexArray(ui->vaos[VAO_debug]);
 
-    GLuint color_loc = glGetUniformLocation(ui->shader[SHADER_debug], "color");
+    glBindBuffer(GL_ARRAY_BUFFER, ui->vbos[VBO_debug]);
+    glBufferData(GL_ARRAY_BUFFER, count*sizeof(Vec2), p, GL_DYNAMIC_DRAW);
+
+    GLuint color_loc = glGetUniformLocation(ui->shaders[SHADER_debug], "color");
     glUniform3f(color_loc, color.r, color.g, color.b);
     glEnable(GL_LINE_SMOOTH);
     glLineWidth(linewidth);
     glDrawArrays(GL_LINES, 0, count);
+
+    free(p);
 }

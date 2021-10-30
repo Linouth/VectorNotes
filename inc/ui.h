@@ -2,8 +2,10 @@
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include "nanovg/nanovg.h"
 
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "vec.h"
 #include "path.h"
@@ -37,17 +39,27 @@ enum shader_type {
 typedef struct ui_ctx {
     GLFWwindow *window;
 
-    GLuint vbo[VBO_count];
-    GLuint vao[VAO_count];
-    GLuint shader[SHADER_count];
+    GLuint vbos[VBO_count];
+    GLuint vaos[VAO_count];
+    GLuint shaders[SHADER_count];
+
+    NVGcontext *vg;
 
     Vec2 mouse_pos;
-    int mouse_state[NUM_MOUSE_STATES];
+    int mouse_states[NUM_MOUSE_STATES];
+    Vec2 mouse_pos_rc;
 
-    unsigned int width, height;
+    unsigned view_width, view_height;
+    Vec2 view_origin;
+
+    // TODO: This should be part of some 'pencil' tool
+    Path *tmp_path;
+    bool tmp_path_ready;
 } UI;
 
 UI *ui_init(unsigned width, unsigned height);
 void ui_deinit(UI *ui);
-void ui_drawSpline(UI *ui, Path *path);
+void ui_drawPath(UI *ui, Path *path);
+void ui_drawLines(UI *ui, Path *path);
+void ui_drawCtrlPoints(UI *ui, Path *path);
 void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color, float linewidth);
