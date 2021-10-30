@@ -51,6 +51,7 @@ typedef struct ui_ctx {
 
     unsigned view_width, view_height;
     Vec2 view_origin;
+    double view_scale;
 
     // TODO: This should be part of some 'pencil' tool
     Path *tmp_path;

@@ -28,7 +28,6 @@
 #define WIDTH 800
 #define HEIGHT 600
 
-UI *ui;
 Path *g_path;
 Path *dbg;
 Path *new;
@@ -44,7 +43,7 @@ int main(void) {
     glfwSetErrorCallback(&glfwError);
     glfwInit();
 
-    ui = ui_init(WIDTH, HEIGHT);
+    UI *ui = ui_init(WIDTH, HEIGHT);
     if (ui == NULL) {
         return -1;
     }
@@ -119,6 +118,8 @@ int main(void) {
     size_t path_cnt = 0;
 
     NVGcontext *vg = ui->vg;
+
+    ui->view_scale = 0.2;
 
     while (!glfwWindowShouldClose(ui->window)) {
         if (ui->tmp_path_ready && path_cnt < 16) {

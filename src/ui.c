@@ -32,7 +32,9 @@ static void setViewport(UI *ui, unsigned width, unsigned height) {
 }
 
 static Vec2 canvasToScreen(UI *ui, Vec2 point) {
-    return vec2_sub(point, ui->view_origin);
+    return vec2_scalarMult(
+            vec2_sub(point, ui->view_origin),
+            ui->view_scale);
 }
 
 static void canvasToScreenN(UI *ui, Vec2 *dest, Vec2 *src, size_t count) {
@@ -42,7 +44,9 @@ static void canvasToScreenN(UI *ui, Vec2 *dest, Vec2 *src, size_t count) {
 }
 
 static Vec2 screenToCanvas(UI *ui, Vec2 point) {
-    return vec2_add(point, ui->view_origin);
+    return vec2_add(
+            vec2_scalarMult(point, 1/ui->view_scale),
+            ui->view_origin);
 }
 
 static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -63,9 +67,6 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
         }
     }
 }
-
-//int g_mouse_states[NUM_MOUSE_STATES] = {0};
-//double g_xpos, g_ypos;
 
 static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) {
     UI *ui = &g_ui;
@@ -124,9 +125,10 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
             prev_len = 0;
         }
     } else if (ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT] == GLFW_PRESS) {
-        Vec2 r = vec2_sub(ui->mouse_pos, ui->mouse_pos_rc);
-        ui->view_origin.x = -r.x;
-        ui->view_origin.y = -r.y;
+        Vec2 r = vec2_sub(
+                screenToCanvas(ui, ui->mouse_pos), ui->mouse_pos_rc);
+        ui->view_origin.x += -r.x;
+        ui->view_origin.y += -r.y;
     }
 }
 
@@ -161,6 +163,12 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
     }
 }
 
+void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+    UI *ui = &g_ui;
+
+    ui->view_scale += yoffset/100;
+}
+
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
     UI *ui = &g_ui;
     setViewport(ui, width, height);
@@ -169,6 +177,7 @@ static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
 UI *ui_init(unsigned width, unsigned height) {
     //UI *ui = malloc(sizeof(UI));
     UI *ui = &g_ui;
+    ui->view_scale = 1.0;
 
     { // Setup window
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -195,6 +204,7 @@ UI *ui_init(unsigned width, unsigned height) {
         glfwSetKeyCallback(ui->window, keyCallback);
         glfwSetMouseButtonCallback(ui->window, mouseButtonCallback);
         glfwSetCursorPosCallback(ui->window, mousePositionCallback);
+        glfwSetScrollCallback(ui->window, scrollCallback);
     }
 
     glGenVertexArrays(VAO_count, ui->vaos);
