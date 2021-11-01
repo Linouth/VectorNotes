@@ -201,10 +201,11 @@ int main(void) {
         //glLineWidth(5.0f);
         //glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
-        printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f\n", ui->mouse_pos.x, ui->mouse_pos.y,
+        printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f; scale: %f\n", ui->mouse_pos.x, ui->mouse_pos.y,
                 ui->mouse_states[GLFW_MOUSE_BUTTON_LEFT],
                 ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT],
-                ui->view_origin.x, ui->view_origin.y);
+                ui->view_origin.x, ui->view_origin.y,
+                ui->view_scale);
 
         glfwSwapBuffers(ui->window);
         glfwWaitEventsTimeout(0.016666);

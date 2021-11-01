@@ -166,7 +166,21 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
     UI *ui = &g_ui;
 
-    ui->view_scale += yoffset/100;
+    printf("%f %f\n", xoffset, yoffset);
+
+    // Zoom by changing the scale parameter, and correcting the view_offset to
+    // scale around the mouse position.
+    if (yoffset != 0.0) {
+        Vec2 mouse_before = screenToCanvas(ui, ui->mouse_pos);
+
+        const double SCALING_FACTOR = 1.05;
+        ui->view_scale *= yoffset > 0 ? SCALING_FACTOR : 1/SCALING_FACTOR;
+
+        Vec2 mouse_after = screenToCanvas(ui, ui->mouse_pos);
+
+        Vec2 r = vec2_sub(mouse_after, mouse_before);
+        ui->view_origin = vec2_sub(ui->view_origin, r);
+    }
 }
 
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
