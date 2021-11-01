@@ -102,7 +102,7 @@ int main(void) {
         path_addNode(g_path, test[i], -1);
     }
 
-    new = path_fitBezier(g_path);
+    new = path_fitBezier(g_path, ui->view_scale);
     printf("New has %ld items\n", new->node_cnt);
     for (size_t i = 0; i < new->node_cnt-1; i+=3) {
         printf("{%f, %f}, {%f, %f}, {%f, %f}, {%f, %f},\n",
@@ -119,11 +119,11 @@ int main(void) {
 
     NVGcontext *vg = ui->vg;
 
-    ui->view_scale = 0.2;
+    ui->view_scale = 1.0;
 
     while (!glfwWindowShouldClose(ui->window)) {
         if (ui->tmp_path_ready && path_cnt < 16) {
-            paths[path_cnt] = path_fitBezier(ui->tmp_path);
+            paths[path_cnt] = path_fitBezier(ui->tmp_path, ui->view_scale);
             ui->tmp_path_ready = false;
 
             path_cnt += 1;

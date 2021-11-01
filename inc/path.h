@@ -24,4 +24,4 @@ void path_deinit(Path *path);
 void path_resize(Path *path, size_t new_capacity);
 void path_addNode(Path *path, Vec2 node, double timestamp);
 Vec2* path_getNode(Path *path, int index);
-Path* path_fitBezier(Path *path);
+Path* path_fitBezier(Path *path, double scale);

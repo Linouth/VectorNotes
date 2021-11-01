@@ -57,7 +57,7 @@ Vec2* path_getNode(Path *path, int index) {
     return NULL;
 }
 
-Path* path_fitBezier(Path *path) {
+Path* path_fitBezier(Path *path, double scale) {
     assert(path->node_cnt > 1);
 
     // TODO: These parameters will have to depend on how far we are zoomed in,
@@ -65,9 +65,9 @@ Path* path_fitBezier(Path *path) {
     BezierFitCtx *fit = fit_init(path->nodes, path->node_cnt);
     fit->timestamps = path->timestamps;
     fit->corner_thresh = PI / 6;
-    fit->tangent_range = 20.0;
-    fit->epsilon = 15.0;
-    fit->psi = 60.0;
+    fit->tangent_range = 20.0 / scale;
+    fit->epsilon = 15.0 / scale;
+    fit->psi = 60.0 / scale;
     fit->max_iter = 3;
 
     fitCurve(fit);

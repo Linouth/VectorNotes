@@ -86,6 +86,7 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
         // have callback functions per tool
         double cmp = 5.0;
         double curr_len = 0;
+        Vec2 prev_node_screen_pos = canvasToScreen(ui, *prev_node);
         if (ui->tmp_path->node_cnt > 1) {
             // The last two points, and a tangent vector determined from
             // these points.
@@ -94,7 +95,7 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
             Vec2 tg = vec2_norm(vec2_sub(*p1, *p0));
 
             // Vector from the last node to the cursor position.
-            Vec2 r = vec2_sub(ui->mouse_pos, *prev_node);
+            Vec2 r = vec2_sub(ui->mouse_pos, prev_node_screen_pos);
             curr_len = vec2_len(r);
 
             // Indicator of angle between tangent vector and cursor vector.
@@ -107,17 +108,15 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
             const double max_len = 128.0;
             const double min_len = 7.0;
             const double exponent = 512.0;
-            //double cmp = 100 / (1 + pow(128, 4*alpha - 2)) + 10;
-            //double cmp = 100 * (1 - 1/(1 + pow(128, 100*alpha - 99.5))) + 8;
             cmp = max_len*pow(alpha, exponent) + min_len;
-            //cmp = 10;
 
             // Whenever the cursor moves back, place a node to capture this movement
             if (curr_len > prev_len)
                 prev_len = curr_len;
         }
 
-        if (curr_len < (prev_len - 5.0) || vec2_dist(*prev_node, ui->mouse_pos) > cmp) {
+        if (curr_len < (prev_len - 5.0)
+                || vec2_dist(prev_node_screen_pos, ui->mouse_pos) > cmp) {
             Vec2 p = screenToCanvas(ui, ui->mouse_pos);
             path_addNode(ui->tmp_path, p, -1);
 
@@ -165,8 +164,6 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
     UI *ui = &g_ui;
-
-    printf("%f %f\n", xoffset, yoffset);
 
     // Zoom by changing the scale parameter, and correcting the view_offset to
     // scale around the mouse position.
