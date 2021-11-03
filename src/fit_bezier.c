@@ -287,8 +287,6 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
     }
     //printf("Level %d; Max distance error is %f at t=%f\n", level, sqrt(max_err), max_err_t);
 
-    // TODO: This error is scale dependent. Think of a solution so that a curve
-    // has the same error if it is scaled up / down
     if (max_err < fit->epsilon*fit->epsilon) {
         // Error is small enough, add curve to list and return;
 

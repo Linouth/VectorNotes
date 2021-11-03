@@ -11,10 +11,33 @@
 
 #include "gl.h"
 #include "path.h"
+#include "tool.h"
 #include "vec.h"
 #include "vectornotes.h"
 
 VnCtx g_vn = {0};
+
+// TODO: Think of a better solution than using a global instance of vn.
+// Possibly having the 'canvas' as a separate ui module
+Vec2 canvasToScreen(Vec2 point) {
+    VnCtx *vn = &g_vn;
+    return vec2_scalarMult(
+            vec2_sub(point, vn->view_origin),
+            vn->view_scale);
+}
+
+void canvasToScreenN(Vec2 *dest, Vec2 *src, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        dest[i] = canvasToScreen(src[i]);
+    }
+}
+
+Vec2 screenToCanvas(Vec2 point) {
+    VnCtx *vn = &g_vn;
+    return vec2_add(
+            vec2_scalarMult(point, 1/vn->view_scale),
+            vn->view_origin);
+}
 
 static void setViewport(VnCtx *vn, unsigned width, unsigned height) {
     glViewport(0, 0, width, height);
@@ -28,24 +51,6 @@ static void setViewport(VnCtx *vn, unsigned width, unsigned height) {
                 glGetUniformLocation(vn->shaders[i], "viewSize"),
                 width, height);
     }
-}
-
-static Vec2 canvasToScreen(VnCtx *vn, Vec2 point) {
-    return vec2_scalarMult(
-            vec2_sub(point, vn->view_origin),
-            vn->view_scale);
-}
-
-static void canvasToScreenN(VnCtx *vn, Vec2 *dest, Vec2 *src, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        dest[i] = canvasToScreen(vn, src[i]);
-    }
-}
-
-static Vec2 screenToCanvas(VnCtx *vn, Vec2 point) {
-    return vec2_add(
-            vec2_scalarMult(point, 1/vn->view_scale),
-            vn->view_origin);
 }
 
 static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -85,61 +90,17 @@ static void mousePositionCallback(GLFWwindow* window, double xpos, double ypos) 
     vn->mouse_pos.x = xpos;
     vn->mouse_pos.y = ypos;
 
-    static Vec2 *prev_node = NULL;
-    static double prev_len = 0;
-
-    if (vn->mouse_states[GLFW_MOUSE_BUTTON_LEFT] == GLFW_PRESS) {
-        if (!prev_node) {
-            prev_node = path_getNode(vn->tmp_path, -1);
-        }
-
-        // TODO: This should probably be in some 'pencil' tool module. Maybe
-        // have callback functions per tool
-        double cmp = 5.0;
-        double curr_len = 0;
-        Vec2 prev_node_screen_pos = canvasToScreen(vn, *prev_node);
-        if (vn->tmp_path->node_cnt > 1) {
-            // The last two points, and a tangent vector determined from
-            // these points.
-            Vec2 *p1 = path_getNode(vn->tmp_path, -1);
-            Vec2 *p0 = path_getNode(vn->tmp_path, -2);
-            Vec2 tg = vec2_norm(vec2_sub(*p1, *p0));
-
-            // Vector from the last node to the cursor position.
-            Vec2 r = vec2_sub(vn->mouse_pos, prev_node_screen_pos);
-            curr_len = vec2_len(r);
-
-            // Indicator of angle between tangent vector and cursor vector.
-            // NOTE: tg is unit length
-            double alpha = vec2_dot(r, tg) / curr_len;
-
-            // Determine the length required for a new node to be placed.
-            // Line segments can be at most 'max_len' long, and min 'min_len' long.
-            // The exponent determines how aggressive the node-placing is.
-            const double max_len = 128.0;
-            const double min_len = 7.0;
-            const double exponent = 512.0;
-            cmp = max_len*pow(alpha, exponent) + min_len;
-
-            // Whenever the cursor moves back, place a node to capture this movement
-            if (curr_len > prev_len)
-                prev_len = curr_len;
-        }
-
-        if (curr_len < (prev_len - 5.0)
-                || vec2_dist(prev_node_screen_pos, vn->mouse_pos) > cmp) {
-            Vec2 p = screenToCanvas(vn, vn->mouse_pos);
-            path_addNode(vn->tmp_path, p, -1);
-
-            prev_node = path_getNode(vn->tmp_path, -1);
-            prev_len = 0;
-        }
-    } else if (vn->mouse_states[GLFW_MOUSE_BUTTON_RIGHT] == GLFW_PRESS) {
+    // Handle right mouse button for panning
+    if (vn->mouse_states[GLFW_MOUSE_BUTTON_RIGHT] == GLFW_PRESS) {
         Vec2 r = vec2_sub(
-                screenToCanvas(vn, vn->mouse_pos), vn->mouse_pos_rc);
+                screenToCanvas(vn->mouse_pos), vn->mouse_pos_rc);
         vn->view_origin.x += -r.x;
         vn->view_origin.y += -r.y;
     }
+
+    Tool *tool = vn->tools[vn->active_tool];
+    if (tool && tool->mousePosCb)
+        tool->mousePosCb(tool, &vn->mouse_pos, vn->mouse_states);
 }
 
 static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
@@ -147,34 +108,16 @@ static void mouseButtonCallback(GLFWwindow* window, int button, int action, int 
 
     vn->mouse_states[button] = action;
 
-    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+    // Needed for panning
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
-            // Button pressed, clear path and start over
-            // TODO: Probably better to just set count to 0
-            if (vn->tmp_path)
-                path_deinit(vn->tmp_path);
-
-            vn->tmp_path = path_init(0);
-            vn->tmp_path_ready = false;
-        } else {
-            // Button released
-            if (vn->tmp_path->node_cnt > 1)
-                vn->tmp_path_ready = true;
-        }
-
-        // Button pressed or released, place point at cursor pos.
-        // Only if the prev node is not at the exact same position.
-        Vec2 p = screenToCanvas(vn, vn->mouse_pos);
-        Vec2 *prev_node = path_getNode(vn->tmp_path, -1);
-        if (prev_node->x != p.x || prev_node->y != p.y) {
-            path_addNode(vn->tmp_path, p, -1);
-            printf("Added a node at %f %f\n", p.x, p.y);
-        }
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
-        if (action == GLFW_PRESS) {
-            vn->mouse_pos_rc = screenToCanvas(vn, vn->mouse_pos);
+            vn->mouse_pos_rc = screenToCanvas(vn->mouse_pos);
         }
     }
+
+    Tool *tool = vn->tools[vn->active_tool];
+    if (tool && tool->mouseBtnCb)
+        tool->mouseBtnCb(tool, &vn->mouse_pos, button, action);
 }
 
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
@@ -190,12 +133,12 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
         if (yoffset == -1.0 && vn->view_scale <= MAX_ZOOM_OUT)
             return;
 
-        Vec2 mouse_before = screenToCanvas(vn, vn->mouse_pos);
+        Vec2 mouse_before = screenToCanvas(vn->mouse_pos);
 
         const double SCALING_FACTOR = 1.05;
         vn->view_scale *= yoffset > 0 ? SCALING_FACTOR : 1/SCALING_FACTOR;
 
-        Vec2 mouse_after = screenToCanvas(vn, vn->mouse_pos);
+        Vec2 mouse_after = screenToCanvas(vn->mouse_pos);
 
         Vec2 r = vec2_sub(mouse_after, mouse_before);
         vn->view_origin = vec2_sub(vn->view_origin, r);
@@ -309,8 +252,10 @@ void vn_deinit(VnCtx *vn) {
     glDeleteBuffers(sizeof(vn->vbos)/sizeof(GLuint), vn->vbos);
     glDeleteVertexArrays(sizeof(vn->vaos)/sizeof(GLuint), vn->vaos);
 
-    if (vn->tmp_path)
-        path_deinit(vn->tmp_path);
+    for (size_t i = 0; i < vn->path_cnt; i++) {
+        assert(vn->paths[i]);
+        path_deinit(vn->paths[i]);
+    }
 
     if (vn->vg)
         nvgDeleteGL3(vn->vg);
@@ -321,18 +266,79 @@ void vn_deinit(VnCtx *vn) {
     //free(vn);
 }
 
+// TODO: tmp
+extern Path *dbg;
+
+void vn_update(VnCtx *vn) {
+    if (vn->path_cnt < MAX_PATH_CNT) {
+        Tool *tool = vn->tools[vn->active_tool];
+        Path *path = tool->update(tool, vn->view_scale);
+
+        if (path) {
+            vn->paths[vn->path_cnt] = path;
+
+            printf("New path finished, %ld nodes\n", vn->paths[vn->path_cnt]->node_cnt);
+
+            vn->path_cnt += 1;
+        }
+    }
+
+    NVGcontext *vg = vn->vg;
+
+    nvgBeginFrame(vg, vn->view_width, vn->view_height, 1.0);
+    nvgSave(vg);
+    {
+        nvgLineCap(vg, NVG_ROUND);
+        nvgLineJoin(vg, NVG_MITER);
+        nvgStrokeWidth(vg, 2.0f);
+        nvgStrokeColor(vg, nvgRGBA(82, 144, 242, 255));
+
+        /*
+        Vec2 *node = NULL;
+        node = &g_path->nodes[0];
+
+        vn_drawLines(vn, g_path);
+
+        vn_drawPath(vn, new);
+        */
+
+        if (vn->tmp_path && vn->tmp_path->node_cnt >= 2) {
+            vn_drawLines(vn, vn->tmp_path);
+        }
+
+        for (size_t i = 0; i < vn->path_cnt; i++) {
+            vn_drawPath(vn, vn->paths[i]);
+        }
+    }
+    nvgRestore(vg);
+    nvgEndFrame(vg);
+
+    if (vn->debug) {
+        //vn_drawCtrlPoints(vn, new);
+
+        for (size_t i = 0; i < vn->path_cnt; i++) {
+            vn_drawCtrlPoints(vn, vn->paths[i]);
+        }
+
+        {
+            Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
+            vn_drawDbgLines(vn, dbg->nodes, dbg->node_cnt, rgb, 1.0);
+        }
+    }
+}
+
 void vn_drawPath(VnCtx *vn, Path *path) {
     assert(vn->vg != NULL);
 
     nvgBeginPath(vn->vg);
     nvgStrokeColor(vn->vg, nvgRGBA(230, 20, 15, 255));
 
-    Vec2 p = canvasToScreen(vn, path->nodes[0]);
+    Vec2 p = canvasToScreen(path->nodes[0]);
     nvgMoveTo(vn->vg, p.x, p.y);
     for (size_t j = 1; j < path->node_cnt; j+=3) {
-        Vec2 p0 = canvasToScreen(vn, path->nodes[j]);
-        Vec2 p1 = canvasToScreen(vn, path->nodes[j+1]);
-        Vec2 p2 = canvasToScreen(vn, path->nodes[j+2]);
+        Vec2 p0 = canvasToScreen(path->nodes[j]);
+        Vec2 p1 = canvasToScreen(path->nodes[j+1]);
+        Vec2 p2 = canvasToScreen(path->nodes[j+2]);
 
         nvgBezierTo(vn->vg,
                 p0.x, p0.y,
@@ -346,10 +352,10 @@ void vn_drawLines(VnCtx *vn, Path *path) {
     nvgBeginPath(vn->vg);
     nvgStrokeColor(vn->vg, nvgRGBA(82, 144, 242, 255));
 
-    Vec2 p = canvasToScreen(vn, path->nodes[0]);
+    Vec2 p = canvasToScreen(path->nodes[0]);
     nvgMoveTo(vn->vg, p.x, p.y);
     for (size_t i = 1; i < path->node_cnt; i++) {
-        p = canvasToScreen(vn, path->nodes[i]);
+        p = canvasToScreen(path->nodes[i]);
         nvgLineTo(vn->vg, p.x, p.y);
     }
     nvgStroke(vn->vg);
@@ -359,7 +365,7 @@ void vn_drawCtrlPoints(VnCtx *vn, Path *path) {
     GLuint color_loc;
 
     Vec2 *nodes = malloc(sizeof(Vec2) * path->node_cnt);
-    canvasToScreenN(vn, nodes, path->nodes, path->node_cnt);
+    canvasToScreenN(nodes, path->nodes, path->node_cnt);
 
     glBindVertexArray(vn->vaos[VAO_spline]);
 
@@ -391,7 +397,7 @@ void vn_drawCtrlPoints(VnCtx *vn, Path *path) {
 
 void vn_drawDbgLines(VnCtx *vn, Vec2 *points, size_t count, Rgb color, float linewidth) {
     Vec2 *p = malloc(sizeof(Vec2) * count);
-    canvasToScreenN(vn, p, points, count);
+    canvasToScreenN(p, points, count);
 
     glUseProgram(vn->shaders[SHADER_debug]);
     glBindVertexArray(vn->vaos[VAO_debug]);

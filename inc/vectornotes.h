@@ -38,7 +38,6 @@ enum shader_type {
 
 #define NUM_MOUSE_STATES 8
 #define MAX_PATH_CNT 8
-#define MAX_TOOL_CNT 8
 typedef struct vn_ctx {
     GLFWwindow *window;
 
@@ -56,10 +55,10 @@ typedef struct vn_ctx {
     Vec2 mouse_pos_rc;  // Mouse pos on right-click
     int mouse_states[NUM_MOUSE_STATES];
 
-    Path paths[MAX_PATH_CNT];
+    Path *paths[MAX_PATH_CNT];
     size_t path_cnt;
 
-    Tool tools[MAX_TOOL_CNT];
+    Tool *tools[TOOLS_count];
     size_t tool_cnt;
     size_t active_tool;
 
@@ -72,7 +71,14 @@ typedef struct vn_ctx {
 
 VnCtx *vn_init(unsigned width, unsigned height);
 void vn_deinit(VnCtx *vn);
+void vn_update(VnCtx *vn);
 void vn_drawPath(VnCtx *vn, Path *path);
 void vn_drawLines(VnCtx *vn, Path *path);
 void vn_drawCtrlPoints(VnCtx *vn, Path *path);
 void vn_drawDbgLines(VnCtx *vn, Vec2 *points, size_t count, Rgb color, float linewidth);
+
+// TODO: Think of a better solution than using a global instance of vn.
+// Possibly having the 'canvas' as a separate ui module
+Vec2 canvasToScreen(Vec2 point);
+void canvasToScreenN(Vec2 *dest, Vec2 *src, size_t count);
+Vec2 screenToCanvas(Vec2 point);

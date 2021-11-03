@@ -22,6 +22,7 @@
 #include "fit_bezier.h"
 #include "gl.h"
 #include "path.h"
+#include "tool.h"
 #include "vec.h"
 #include "vectornotes.h"
 
@@ -48,6 +49,7 @@ int main(void) {
         glfwTerminate();
         return -1;
     }
+    vn->tools[TOOLS_pencil] = pencil_init();
 
     Vec2 test[] = {
         //{400.0, 200.0},
@@ -115,23 +117,24 @@ int main(void) {
 
     glfwSetTime(0);
 
-    Path *paths[16];
-    size_t path_cnt = 0;
-
-    NVGcontext *vg = vn->vg;
+    //Path *paths[16];
+    //size_t path_cnt = 0;
+    //NVGcontext *vg = vn->vg;
 
     vn->view_scale = 1.0;
 
     while (!glfwWindowShouldClose(vn->window)) {
-        if (vn->tmp_path_ready && path_cnt < 16) {
-            paths[path_cnt] = path_fitBezier(vn->tmp_path, vn->view_scale);
-            vn->tmp_path_ready = false;
+        //if (vn->tmp_path_ready && path_cnt < 16) {
+        //    paths[path_cnt] = path_fitBezier(vn->tmp_path, vn->view_scale);
+        //    vn->tmp_path_ready = false;
 
-            path_cnt += 1;
-        }
-
+        //    path_cnt += 1;
+        //}
         glClear(GL_COLOR_BUFFER_BIT);
 
+        vn_update(vn);
+
+        /*
         nvgBeginFrame(vg, vn->view_width, vn->view_height, 1.0);
         nvgSave(vg);
         {
@@ -169,6 +172,7 @@ int main(void) {
                 vn_drawDbgLines(vn, dbg->nodes, dbg->node_cnt, rgb, 1.0);
             }
         }
+        */
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
         // equal to the last. This will buffer overflow.

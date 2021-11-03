@@ -74,8 +74,8 @@ Path* path_fitBezier(Path *path, double scale) {
     fit->corner_thresh = PI / 6;
     fit->tangent_range = 20.0 / scale;
     fit->epsilon = 10.0 / scale;
-    fit->psi = 50.0 / scale;
-    fit->max_iter = 3;
+    fit->psi = 80.0 / scale;
+    fit->max_iter = 4;
 
     fitCurve(fit);
 
