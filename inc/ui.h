@@ -56,6 +56,8 @@ typedef struct ui_ctx {
     // TODO: This should be part of some 'pencil' tool
     Path *tmp_path;
     bool tmp_path_ready;
+
+    bool debug;
 } UI;
 
 UI *ui_init(unsigned width, unsigned height);

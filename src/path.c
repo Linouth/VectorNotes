@@ -26,8 +26,15 @@ Path* path_init(size_t count) {
     return path;
 }
 
+#include <stdio.h>
 void path_deinit(Path *path) {
-    free(path);
+
+    if(path) {
+        if (path->nodes) free(path->nodes);
+        if (path->timestamps) free(path->timestamps);
+
+        free(path);
+    }
 }
 
 void path_resize(Path *path, size_t new_capacity) {
@@ -66,8 +73,8 @@ Path* path_fitBezier(Path *path, double scale) {
     fit->timestamps = path->timestamps;
     fit->corner_thresh = PI / 6;
     fit->tangent_range = 20.0 / scale;
-    fit->epsilon = 15.0 / scale;
-    fit->psi = 60.0 / scale;
+    fit->epsilon = 10.0 / scale;
+    fit->psi = 50.0 / scale;
     fit->max_iter = 3;
 
     fitCurve(fit);

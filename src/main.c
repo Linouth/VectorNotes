@@ -45,6 +45,7 @@ int main(void) {
 
     UI *ui = ui_init(WIDTH, HEIGHT);
     if (ui == NULL) {
+        glfwTerminate();
         return -1;
     }
 
@@ -157,34 +158,16 @@ int main(void) {
         nvgRestore(vg);
         nvgEndFrame(vg);
 
-        ui_drawCtrlPoints(ui, new);
-        for (size_t i = 0; i < path_cnt; i++) {
-            ui_drawCtrlPoints(ui, paths[i]);
-        }
+        if (ui->debug) {
+            ui_drawCtrlPoints(ui, new);
+            for (size_t i = 0; i < path_cnt; i++) {
+                ui_drawCtrlPoints(ui, paths[i]);
+            }
 
-        /*
-        if (g_path->node_cnt > 1) {
-            Vec2 p1 = g_path->nodes[g_path->node_cnt-1];
-            Vec2 p0 = g_path->nodes[g_path->node_cnt-2];
-            Vec2 tg = vec2_norm(vec2_sub(p1, p0));
-
-            Vec2 points[] = {
-                p1,
-                vec2_add(p1, vec2_scalarMult(tg, 30.0)),
-            };
-            Rgb rgb = {1.0, 1.0, 1.0};
-
-            ui_drawDbgLines(&ui, points, 2, rgb, 1.0f);
-        }
-
-        {
-            Rgb rgb = {1, 1, 1};
-            ui_drawDbgLines(&ui, new->nodes, 6, rgb, 1.0f);
-        }
-        */
-        {
-            Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
-            ui_drawDbgLines(ui, dbg->nodes, dbg->node_cnt, rgb, 1.0);
+            {
+                Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
+                ui_drawDbgLines(ui, dbg->nodes, dbg->node_cnt, rgb, 1.0);
+            }
         }
 
         // TODO: Adjacency is currently hacked in by setting the last+1 element
@@ -201,20 +184,19 @@ int main(void) {
         //glLineWidth(5.0f);
         //glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
-        printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f; scale: %f\n", ui->mouse_pos.x, ui->mouse_pos.y,
-                ui->mouse_states[GLFW_MOUSE_BUTTON_LEFT],
-                ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT],
-                ui->view_origin.x, ui->view_origin.y,
-                ui->view_scale);
+        //printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f; scale: %f\n", ui->mouse_pos.x, ui->mouse_pos.y,
+        //        ui->mouse_states[GLFW_MOUSE_BUTTON_LEFT],
+        //        ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT],
+        //        ui->view_origin.x, ui->view_origin.y,
+        //        ui->view_scale);
 
         glfwSwapBuffers(ui->window);
         glfwWaitEventsTimeout(0.016666);
     }
     path_deinit(g_path);
+    path_deinit(dbg);
     path_deinit(new);
 
     ui_deinit(ui);
-
-    glfwTerminate();
     return 0;
 }
