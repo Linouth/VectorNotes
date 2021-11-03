@@ -4,11 +4,12 @@
 #include <GLFW/glfw3.h>
 #include "nanovg/nanovg.h"
 
-#include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
-#include "vec.h"
 #include "path.h"
+#include "tool.h"
+#include "vec.h"
 
 typedef struct rgb {
     float r;
@@ -36,7 +37,9 @@ enum shader_type {
 };
 
 #define NUM_MOUSE_STATES 8
-typedef struct ui_ctx {
+#define MAX_PATH_CNT 8
+#define MAX_TOOL_CNT 8
+typedef struct vn_ctx {
     GLFWwindow *window;
 
     GLuint vbos[VBO_count];
@@ -45,24 +48,31 @@ typedef struct ui_ctx {
 
     NVGcontext *vg;
 
-    Vec2 mouse_pos;
-    int mouse_states[NUM_MOUSE_STATES];
-    Vec2 mouse_pos_rc;
-
     unsigned view_width, view_height;
     Vec2 view_origin;
     double view_scale;
+
+    Vec2 mouse_pos;
+    Vec2 mouse_pos_rc;  // Mouse pos on right-click
+    int mouse_states[NUM_MOUSE_STATES];
+
+    Path paths[MAX_PATH_CNT];
+    size_t path_cnt;
+
+    Tool tools[MAX_TOOL_CNT];
+    size_t tool_cnt;
+    size_t active_tool;
 
     // TODO: This should be part of some 'pencil' tool
     Path *tmp_path;
     bool tmp_path_ready;
 
     bool debug;
-} UI;
+} VnCtx;
 
-UI *ui_init(unsigned width, unsigned height);
-void ui_deinit(UI *ui);
-void ui_drawPath(UI *ui, Path *path);
-void ui_drawLines(UI *ui, Path *path);
-void ui_drawCtrlPoints(UI *ui, Path *path);
-void ui_drawDbgLines(UI *ui, Vec2 *points, size_t count, Rgb color, float linewidth);
+VnCtx *vn_init(unsigned width, unsigned height);
+void vn_deinit(VnCtx *vn);
+void vn_drawPath(VnCtx *vn, Path *path);
+void vn_drawLines(VnCtx *vn, Path *path);
+void vn_drawCtrlPoints(VnCtx *vn, Path *path);
+void vn_drawDbgLines(VnCtx *vn, Vec2 *points, size_t count, Rgb color, float linewidth);

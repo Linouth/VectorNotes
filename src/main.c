@@ -11,19 +11,19 @@
 //#define NANOVG_GL3_IMPLEMENTATION
 //#include "nanovg/nanovg_gl.h"
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#include "vec.h"
-#include "gl.h"
 #include "fit_bezier.h"
+#include "gl.h"
 #include "path.h"
-#include "ui.h"
+#include "vec.h"
+#include "vectornotes.h"
 
 #define WIDTH 800
 #define HEIGHT 600
@@ -43,8 +43,8 @@ int main(void) {
     glfwSetErrorCallback(&glfwError);
     glfwInit();
 
-    UI *ui = ui_init(WIDTH, HEIGHT);
-    if (ui == NULL) {
+    VnCtx *vn = vn_init(WIDTH, HEIGHT);
+    if (vn == NULL) {
         glfwTerminate();
         return -1;
     }
@@ -103,7 +103,7 @@ int main(void) {
         path_addNode(g_path, test[i], -1);
     }
 
-    new = path_fitBezier(g_path, ui->view_scale);
+    new = path_fitBezier(g_path, vn->view_scale);
     printf("New has %ld items\n", new->node_cnt);
     for (size_t i = 0; i < new->node_cnt-1; i+=3) {
         printf("{%f, %f}, {%f, %f}, {%f, %f}, {%f, %f},\n",
@@ -118,21 +118,21 @@ int main(void) {
     Path *paths[16];
     size_t path_cnt = 0;
 
-    NVGcontext *vg = ui->vg;
+    NVGcontext *vg = vn->vg;
 
-    ui->view_scale = 1.0;
+    vn->view_scale = 1.0;
 
-    while (!glfwWindowShouldClose(ui->window)) {
-        if (ui->tmp_path_ready && path_cnt < 16) {
-            paths[path_cnt] = path_fitBezier(ui->tmp_path, ui->view_scale);
-            ui->tmp_path_ready = false;
+    while (!glfwWindowShouldClose(vn->window)) {
+        if (vn->tmp_path_ready && path_cnt < 16) {
+            paths[path_cnt] = path_fitBezier(vn->tmp_path, vn->view_scale);
+            vn->tmp_path_ready = false;
 
             path_cnt += 1;
         }
 
         glClear(GL_COLOR_BUFFER_BIT);
 
-        nvgBeginFrame(vg, ui->view_width, ui->view_height, 1.0);
+        nvgBeginFrame(vg, vn->view_width, vn->view_height, 1.0);
         nvgSave(vg);
         {
             nvgLineCap(vg, NVG_ROUND);
@@ -143,30 +143,30 @@ int main(void) {
             Vec2 *node = NULL;
             node = &g_path->nodes[0];
 
-            ui_drawLines(ui, g_path);
+            vn_drawLines(vn, g_path);
 
-            ui_drawPath(ui, new);
+            vn_drawPath(vn, new);
 
-            if (ui->tmp_path && ui->tmp_path->node_cnt >= 2) {
-                ui_drawLines(ui, ui->tmp_path);
+            if (vn->tmp_path && vn->tmp_path->node_cnt >= 2) {
+                vn_drawLines(vn, vn->tmp_path);
             }
 
             for (size_t i = 0; i < path_cnt; i++) {
-                ui_drawPath(ui, paths[i]);
+                vn_drawPath(vn, paths[i]);
             }
         }
         nvgRestore(vg);
         nvgEndFrame(vg);
 
-        if (ui->debug) {
-            ui_drawCtrlPoints(ui, new);
+        if (vn->debug) {
+            vn_drawCtrlPoints(vn, new);
             for (size_t i = 0; i < path_cnt; i++) {
-                ui_drawCtrlPoints(ui, paths[i]);
+                vn_drawCtrlPoints(vn, paths[i]);
             }
 
             {
                 Rgb rgb = {255.0f/255, 200.0f/255, 64.0f/255};
-                ui_drawDbgLines(ui, dbg->nodes, dbg->node_cnt, rgb, 1.0);
+                vn_drawDbgLines(vn, dbg->nodes, dbg->node_cnt, rgb, 1.0);
             }
         }
 
@@ -184,19 +184,19 @@ int main(void) {
         //glLineWidth(5.0f);
         //glDrawArrays(GL_LINE_STRIP, 0, g_path.node_cnt);
 
-        //printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f; scale: %f\n", ui->mouse_pos.x, ui->mouse_pos.y,
-        //        ui->mouse_states[GLFW_MOUSE_BUTTON_LEFT],
-        //        ui->mouse_states[GLFW_MOUSE_BUTTON_RIGHT],
-        //        ui->view_origin.x, ui->view_origin.y,
-        //        ui->view_scale);
+        //printf("x: %f, y: %f; bl: %d, br: %d; origin x: %f, y: %f; scale: %f\n", vn->mouse_pos.x, vn->mouse_pos.y,
+        //        vn->mouse_states[GLFW_MOUSE_BUTTON_LEFT],
+        //        vn->mouse_states[GLFW_MOUSE_BUTTON_RIGHT],
+        //        vn->view_origin.x, vn->view_origin.y,
+        //        vn->view_scale);
 
-        glfwSwapBuffers(ui->window);
+        glfwSwapBuffers(vn->window);
         glfwWaitEventsTimeout(0.016666);
     }
     path_deinit(g_path);
     path_deinit(dbg);
     path_deinit(new);
 
-    ui_deinit(ui);
+    vn_deinit(vn);
     return 0;
 }

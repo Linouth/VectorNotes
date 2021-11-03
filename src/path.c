@@ -1,13 +1,13 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include <stdlib.h>
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "fit_bezier.h"
 #include "path.h"
 #include "vec.h"
-#include "fit_bezier.h"
 
 const double PI = 3.1415926535897932384626433832795;
 
