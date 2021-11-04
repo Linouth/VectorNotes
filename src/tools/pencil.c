@@ -69,13 +69,14 @@ static void mousePosCb(Tool *tool, Vec2 *mouse_pos, int mouse_states[]) {
 static void mouseBtnCb(Tool *tool, Vec2 *mouse_pos, int button, int action) {
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
-            assert(tool->tmp_path == NULL);
-            // Button pressed, clear path and start over
-            // TODO: Probably better to just set count to 0
-            //if (tool->tmp_path)
-            //    path_deinit(tool->tmp_path);
+            // Create a new path on the very first call.
+            if (!tool->tmp_path)
+                tool->tmp_path = path_init(0);
 
-            tool->tmp_path = path_init(0);
+            // If the path is ready on update, the tmp_path is reset to 0 count
+            // (So the path memory reused)
+            assert(tool->tmp_path->node_cnt == 0);
+
             tool->tmp_path_ready = false;
         } else {
             // Button released
@@ -98,10 +99,8 @@ static void mouseBtnCb(Tool *tool, Vec2 *mouse_pos, int button, int action) {
 static Path *update(Tool *tool, double scale) {
     if (tool->tmp_path_ready) {
         Path *out = path_fitBezier(tool->tmp_path, scale);
+        tool->tmp_path->node_cnt = 0;
         tool->tmp_path_ready = false;
-
-        path_deinit(tool->tmp_path);
-        tool->tmp_path = NULL;
 
         return out;
     }

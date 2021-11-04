@@ -50,6 +50,8 @@ int main(void) {
         return -1;
     }
     vn->tools[TOOLS_pencil] = pencil_init();
+    vn->tool_cnt += 1;
+    vn->active_tool = TOOLS_pencil;
 
     Vec2 test[] = {
         //{400.0, 200.0},
@@ -122,6 +124,7 @@ int main(void) {
     //NVGcontext *vg = vn->vg;
 
     vn->view_scale = 1.0;
+    glClearColor(1.0, 1.0, 1.0, 1.0);
 
     while (!glfwWindowShouldClose(vn->window)) {
         //if (vn->tmp_path_ready && path_cnt < 16) {
@@ -132,6 +135,8 @@ int main(void) {
         //}
         glClear(GL_COLOR_BUFFER_BIT);
 
+        // TODO: Move drawing code to a vn_draw call. Updating the internal
+        // state should not draw to the screen.
         vn_update(vn);
 
         /*

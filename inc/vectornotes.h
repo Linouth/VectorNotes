@@ -37,7 +37,7 @@ enum shader_type {
 };
 
 #define NUM_MOUSE_STATES 8
-#define MAX_PATH_CNT 8
+#define DEFAULT_PATH_CAPACITY 8
 typedef struct vn_ctx {
     GLFWwindow *window;
 
@@ -55,16 +55,13 @@ typedef struct vn_ctx {
     Vec2 mouse_pos_rc;  // Mouse pos on right-click
     int mouse_states[NUM_MOUSE_STATES];
 
-    Path *paths[MAX_PATH_CNT];
+    Path **paths;
     size_t path_cnt;
+    size_t path_capacity;
 
     Tool *tools[TOOLS_count];
     size_t tool_cnt;
     size_t active_tool;
-
-    // TODO: This should be part of some 'pencil' tool
-    Path *tmp_path;
-    bool tmp_path_ready;
 
     bool debug;
 } VnCtx;

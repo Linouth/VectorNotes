@@ -72,9 +72,10 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
                 vn->debug = !vn->debug;
                 break;
             case GLFW_KEY_P: {
-                for (size_t i = 0; i < vn->tmp_path->node_cnt; i++) {
-                    printf("{%f, %f},\n",
-                            vn->tmp_path->nodes[i].x, vn->tmp_path->nodes[i].y);
+                if (vn->path_cnt == 0) break;
+                Path *p = vn->paths[vn->path_cnt-1];
+                for (size_t i = 0; i < p->node_cnt; i++) {
+                    printf("{%f, %f},\n", p->nodes[i].x, p->nodes[i].y);
                 }
             } break;
 
@@ -242,6 +243,11 @@ VnCtx *vn_init(unsigned width, unsigned height) {
     if (!vn->vg)
         return NULL;
 
+    vn->paths = malloc(DEFAULT_PATH_CAPACITY * sizeof(Path*));
+    vn->path_capacity = DEFAULT_PATH_CAPACITY;
+
+    assert(vn->paths != NULL);
+
     return vn;
 }
 
@@ -252,9 +258,11 @@ void vn_deinit(VnCtx *vn) {
     glDeleteBuffers(sizeof(vn->vbos)/sizeof(GLuint), vn->vbos);
     glDeleteVertexArrays(sizeof(vn->vaos)/sizeof(GLuint), vn->vaos);
 
-    for (size_t i = 0; i < vn->path_cnt; i++) {
-        assert(vn->paths[i]);
-        path_deinit(vn->paths[i]);
+    if (vn->paths) {
+        for (size_t i = 0; i < vn->path_cnt; i++) {
+            assert(vn->paths[i]);
+            path_deinit(vn->paths[i]);
+        }
     }
 
     if (vn->vg)
@@ -270,17 +278,22 @@ void vn_deinit(VnCtx *vn) {
 extern Path *dbg;
 
 void vn_update(VnCtx *vn) {
-    if (vn->path_cnt < MAX_PATH_CNT) {
-        Tool *tool = vn->tools[vn->active_tool];
-        Path *path = tool->update(tool, vn->view_scale);
+    Tool *tool = vn->tools[vn->active_tool];
+    Path *path = tool->update(tool, vn->view_scale);
 
-        if (path) {
-            vn->paths[vn->path_cnt] = path;
-
-            printf("New path finished, %ld nodes\n", vn->paths[vn->path_cnt]->node_cnt);
-
-            vn->path_cnt += 1;
+    if (path) {
+        if (vn->path_cnt >= vn->path_capacity) {
+            // Path array is full, increase its capacity
+            vn->path_capacity *= 2;
+            vn->paths = realloc(vn->paths, vn->path_capacity * sizeof(Path*));
+            assert(vn->paths != NULL);
         }
+
+        vn->paths[vn->path_cnt] = path;
+
+        printf("New path finished, %ld nodes, total %ld paths\n", vn->paths[vn->path_cnt]->node_cnt, vn->path_cnt);
+
+        vn->path_cnt += 1;
     }
 
     NVGcontext *vg = vn->vg;
@@ -293,17 +306,8 @@ void vn_update(VnCtx *vn) {
         nvgStrokeWidth(vg, 2.0f);
         nvgStrokeColor(vg, nvgRGBA(82, 144, 242, 255));
 
-        /*
-        Vec2 *node = NULL;
-        node = &g_path->nodes[0];
-
-        vn_drawLines(vn, g_path);
-
-        vn_drawPath(vn, new);
-        */
-
-        if (vn->tmp_path && vn->tmp_path->node_cnt >= 2) {
-            vn_drawLines(vn, vn->tmp_path);
+        if (tool->tmp_path && tool->tmp_path->node_cnt >= 2) {
+            vn_drawLines(vn, tool->tmp_path);
         }
 
         for (size_t i = 0; i < vn->path_cnt; i++) {
@@ -374,10 +378,11 @@ void vn_drawCtrlPoints(VnCtx *vn, Path *path) {
 
     {
         glUseProgram(vn->shaders[SHADER_simple]);
-        glPointSize(2.0f);
+        glPointSize(4.0f);
         color_loc = glGetUniformLocation(vn->shaders[SHADER_simple], "color");
 
-        glUniform4f(color_loc, 0.70, 0.70, 0.70, 1.0);
+        //glUniform4f(color_loc, 0.43, 0.43, 0.43, 1.0);
+        glUniform4f(color_loc, 0.60, 0.60, 0.60, 1.0);
         glDrawArrays(GL_POINTS, 0, path->node_cnt);
     }
 
@@ -388,7 +393,7 @@ void vn_drawCtrlPoints(VnCtx *vn, Path *path) {
         glLineWidth(1.0f);
         color_loc = glGetUniformLocation(vn->shaders[SHADER_stipple], "color");
 
-        glUniform4f(color_loc, 0.173, 0.325, 0.749, 0.1);
+        glUniform4f(color_loc, 0.173, 0.325, 0.749, 1.0);
         glDrawArrays(GL_LINE_STRIP, 0, path->node_cnt);
     }
 
