@@ -104,7 +104,7 @@ int main(void) {
     };
 
     for (size_t i = 0; i < sizeof(test) / sizeof(Vec2); i++) {
-        path_addNode(g_path, test[i], -1);
+        path_addNode(g_path, test[i]);
     }
 
     new = path_fitBezier(g_path, vn->view_scale);

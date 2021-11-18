@@ -128,7 +128,7 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
     // scale around the mouse position.
     if (yoffset != 0.0) {
         const double MAX_ZOOM_IN = 1.5e13;
-        const double MAX_ZOOM_OUT = 1.0e-20;
+        const double MAX_ZOOM_OUT = 1.0e-18;
         if (yoffset == 1.0 && vn->view_scale >= MAX_ZOOM_IN)
             return;
         if (yoffset == -1.0 && vn->view_scale <= MAX_ZOOM_OUT)

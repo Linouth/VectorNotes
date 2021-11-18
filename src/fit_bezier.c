@@ -12,7 +12,7 @@
 
 // Temp for debugging
 typedef struct path Path;
-void path_addNode(Path *path, Vec2 node, double timestamp);
+void path_addNode(Path *path, Vec2 node);
 extern Path *dbg;
 
 BezierFitCtx *fit_init(Vec2 points[], size_t count) {
@@ -268,11 +268,9 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
 
     // Calculate the error (distance) between the curve and the points
     double max_err = 0;
-    double max_err_t = 0;
     size_t max_err_i = 0;
     Vec2 max_err_d = {0, 0};
     for (size_t i = i_start; i <= i_end; i++) {
-        double t = fit->params[i]; // Only needed for Bn calcs, so can be removed now
         Vec2 d = fit->points[i];
 
         Vec2 p = calcBezier(fit, i, v0, v1, v2, v3);
@@ -280,7 +278,6 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
         double err = vec2_distSqr(d, p);
         if (err > max_err) {
             max_err = err;
-            max_err_t = t;
             max_err_i = i;
             max_err_d = d;
         }
@@ -294,8 +291,8 @@ void fitBezier(BezierFitCtx *fit, Vec2 t1, Vec2 t2, unsigned level, size_t i_sta
         p = vec2_add(p, vec2_scalarMult(v1, fit->coeffs[max_err_i].B1));
         p = vec2_add(p, vec2_scalarMult(v2, fit->coeffs[max_err_i].B2));
         p = vec2_add(p, vec2_scalarMult(v3, fit->coeffs[max_err_i].B3));
-        path_addNode(dbg, max_err_d, 0);
-        path_addNode(dbg, p, 0);
+        path_addNode(dbg, max_err_d);
+        path_addNode(dbg, p);
 
         addToNewPath(fit, v1, -1);
         addToNewPath(fit, v2, -1);

@@ -58,7 +58,7 @@ static void mousePosCb(Tool *tool, Vec2 *mouse_pos, int mouse_states[]) {
         if (curr_len < (prev_len - 5.0)
                 || vec2_dist(prev_node_screen_pos, *mouse_pos) > cmp) {
             Vec2 p = screenToCanvas(*mouse_pos);
-            path_addNode(tool->tmp_path, p, -1);
+            path_addNode(tool->tmp_path, p);
 
             prev_node = path_getNode(tool->tmp_path, -1);
             prev_len = 0;
@@ -89,7 +89,7 @@ static void mouseBtnCb(Tool *tool, Vec2 *mouse_pos, int button, int action) {
         Vec2 p = screenToCanvas(*mouse_pos);
         Vec2 *prev_node = path_getNode(tool->tmp_path, -1);
         if (prev_node->x != p.x || prev_node->y != p.y) {
-            path_addNode(tool->tmp_path, p, -1);
+            path_addNode(tool->tmp_path, p);
             printf("Added a node at %f %f\n", p.x, p.y);
         }
     }
