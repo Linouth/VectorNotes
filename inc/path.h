@@ -14,13 +14,13 @@ typedef enum path_type {
 typedef struct path {
     PathType    type;
     Vec2        *nodes;
-    size_t      node_cnt;
-    size_t      capacity;
+    unsigned    node_cnt;
+    unsigned    capacity;
 } Path;
 
-Path* path_init(size_t count);
+Path* path_init(unsigned count);
 void path_deinit(Path *path);
-void path_resize(Path *path, size_t new_capacity);
+void path_resize(Path *path, unsigned new_capacity);
 void path_addNode(Path *path, Vec2 node);
 Vec2* path_getNode(Path *path, int index);
 Path* path_fitBezier(Path *path, double scale);

@@ -291,7 +291,7 @@ void vn_update(VnCtx *vn) {
 
         vn->paths[vn->path_cnt] = path;
 
-        printf("New path finished, %ld nodes, total %ld paths\n", vn->paths[vn->path_cnt]->node_cnt, vn->path_cnt);
+        printf("New path finished, %d nodes, total %d paths\n", vn->paths[vn->path_cnt]->node_cnt, vn->path_cnt);
 
         vn->path_cnt += 1;
     }

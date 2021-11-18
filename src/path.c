@@ -11,11 +11,11 @@
 
 const double PI = 3.1415926535897932384626433832795;
 
-Path* path_init(size_t count) {
+Path* path_init(unsigned count) {
     Path *path = calloc(1, sizeof(Path));
     assert(path != NULL);
 
-    size_t capacity = count > 0 ? count : PATH_DEFAULT_CAPACITY;
+    unsigned capacity = count > 0 ? count : PATH_DEFAULT_CAPACITY;
     path->nodes = malloc(sizeof(Vec2) * capacity);
     path->capacity = capacity;
 
@@ -32,7 +32,7 @@ void path_deinit(Path *path) {
     }
 }
 
-void path_resize(Path *path, size_t new_capacity) {
+void path_resize(Path *path, unsigned new_capacity) {
     path->nodes = realloc(path->nodes, sizeof(Vec2) * new_capacity);
     path->capacity = new_capacity;
 

@@ -108,7 +108,7 @@ int main(void) {
     }
 
     new = path_fitBezier(g_path, vn->view_scale);
-    printf("New has %ld items\n", new->node_cnt);
+    printf("New has %d items\n", new->node_cnt);
     for (size_t i = 0; i < new->node_cnt-1; i+=3) {
         printf("{%f, %f}, {%f, %f}, {%f, %f}, {%f, %f},\n",
                 new->nodes[i+0].x, new->nodes[i+0].y,

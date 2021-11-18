@@ -56,8 +56,8 @@ typedef struct vn_ctx {
     int mouse_states[NUM_MOUSE_STATES];
 
     Path **paths;
-    size_t path_cnt;
-    size_t path_capacity;
+    unsigned path_cnt;
+    unsigned path_capacity;
 
     Tool *tools[TOOLS_count];
     size_t tool_cnt;
